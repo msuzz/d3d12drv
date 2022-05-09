@@ -45,9 +45,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <ProjectGuid>{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}</ProjectGuid>
-    <RootNamespace>d3d12drv</RootNamespace>
+    <RootNamespace>d3d11drv</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <ProjectName>d3d12drv</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Rune 1.00 Debug|Win32'" Label="Configuration">
