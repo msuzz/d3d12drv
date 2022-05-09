@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<VisualStudioPropertySheet
+	ProjectType="Visual C++"
+	Version="8.00"
+	Name="rune"
+	>
+	<Tool
+		Name="VCCLCompilerTool"
+		PreprocessorDefinitions="RUNE"
+	/>
+	<UserMacro
+		Name="GAMENAME"
+		Value="Rune"
+	/>
+	<UserMacro
+		Name="GAMEDIR"
+		Value="D:\Rune"
+	/>
+	<UserMacro
+		Name="GAMEEXE"
+		Value="Rune.exe"
+	/>
+</VisualStudioPropertySheet>

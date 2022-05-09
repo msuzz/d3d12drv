@@ -1,0 +1,1290 @@
+/**
+\class D3D
+
+Main Direct3D functionality; self-contained, does not call external functions apart from the debug output one.
+Does not use Unreal data apart from a couple of PolyFlags. Does not require the renderer interface to deal with Direct3D structures.
+Quite a lot of code, but splitting this up does not really seem worth it.
+
+An effort is made to reduce the amount of needed draw() calls. As such, state is only changed when absolutely necessary.
+
+TODO:
+Take out D3Dx?
+Different shaders/input layouts for different drawXXXX renderer calls for smaller vertex size?
+
+*/
+#ifdef _DEBUG
+#define _DEBUGDX //debug device
+#endif
+
+#include <dxgi.h>
+#include <d3d11.h>
+#include <xnamath.h>
+#include <D3DX11async.h>
+#include <hash_map>
+#include "d3d11drv.h"
+#include "polyflags.h" //for polyflags
+#include "d3d.h"
+
+/**
+D3D Objects
+*/
+static struct
+{
+	IDXGIFactory1 *factory;
+	IDXGIOutput* output;
+	ID3D11Device* device;
+	ID3D11DeviceContext* deviceContext;
+	IDXGISwapChain* swapChain;
+	ID3D11RenderTargetView* renderTargetView;
+	ID3D11InputLayout* vertexLayout;
+	ID3D11Buffer* vertexBuffer;	
+	ID3D11Buffer* indexBuffer;
+	ID3DX11Effect* effect;
+	ID3D11DepthStencilView* depthStencilView;
+} D3DObjects;
+
+/**
+Shader side variables
+*/
+static struct
+{
+	ID3DX11EffectMatrixVariable* projection; /**< projection matrix */
+	ID3DX11EffectScalarVariable* projectionMode; /**< Projection transform mode (near/far) */
+	ID3DX11EffectScalarVariable* useTexturePass; /**< Bool whether to use each texture pass (shader side) */
+	ID3DX11EffectShaderResourceVariable* shaderTextures; /**< GPU side currently bound textures */
+	ID3DX11EffectVectorVariable* flashColor; /**< Flash color */
+	ID3DX11EffectScalarVariable* flashEnable; /**< Flash enabled? */
+	ID3DX11EffectScalarVariable* time; /**< Time for sin() etc */
+	ID3DX11EffectScalarVariable* viewportHeight; /**< Viewport height in pixels */
+	ID3DX11EffectScalarVariable* viewportWidth; /**< Viewport width in pixels */
+	ID3DX11EffectScalarVariable* brightness; /**< Brightness 0-1 */
+	ID3DX11EffectVectorVariable* fogColor; /**< Fog color */
+	ID3DX11EffectScalarVariable* fogDist; /**< Fog end distance? */
+}  shaderVars;
+
+/**
+States (defined in fx file)
+*/
+static struct
+{
+	ID3D11DepthStencilState* dstate_Enable;
+	ID3D11DepthStencilState* dstate_Disable;
+	ID3D11BlendState* bstate_Alpha;
+	ID3D11BlendState* bstate_Translucent;
+	ID3D11BlendState* bstate_Modulate;
+	ID3D11BlendState* bstate_NoBlend;
+	ID3D11BlendState* bstate_Masked;
+	ID3D11BlendState* bstate_Invis;	
+} states;
+
+/**
+Texture cache variables
+*/
+static struct
+{
+	DWORD64 boundTextureID[D3D::DUMMY_NUM_PASSES]; /**< CPU side bound texture IDs for the various passes as defined in the shader */
+	BOOL enabled[D3D::DUMMY_NUM_PASSES]; /**< Bool whether to use each texture pass (CPU side, used to set shaderVars.useTexturePass) */
+} texturePasses;
+
+/*
+The texture cache
+*/
+stdext::hash_map <unsigned __int64,D3D::CachedTexture> textureCache;
+
+/*
+Triangle fans are drawn indexed. Their vertices and draw indexes are stored in mapped buffers.
+At the start of a frame or when the buffer is full, it gets emptied. Otherwise, the buffer is reused over multiple draw() calls.
+*/
+const unsigned int I_BUFFER_SIZE = 20000; //20000 measured to be about max
+const unsigned int V_BUFFER_SIZE = I_BUFFER_SIZE; //In worst case, one point for each index
+static unsigned int numVerts; //Number of buffered verts
+static unsigned int numIndices; //Number of buffered indices
+static unsigned int numUndrawnIndices; //Number of buffered indices not yet drawn
+static D3D11_MAPPED_SUBRESOURCE mappedVBuffer; //Memmapped version of vertex buffer
+static D3D11_MAPPED_SUBRESOURCE mappedIBuffer; //Memmapped version of index buffer
+
+/*
+Misc
+*/
+static const DXGI_FORMAT BACKBUFFER_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
+static const D3D_FEATURE_LEVEL featureLevels[] = {D3D_FEATURE_LEVEL_10_0}; /**< What feature levels are supportes */
+static const float TIME_STEP = (1/60.0f); //Shader time variable increase speed
+static D3D::Options options;
+
+/**
+Create Direct3D device, swapchain, etc. Purely boilerplate stuff.
+
+\param hWnd Window to use as a surface.
+\param createOptions the D3D::Options which to use.
+\param zNear Near Z value.
+*/
+int D3D::init(HWND hWnd,D3D::Options &createOptions)
+{
+	HRESULT hr;
+
+	options = createOptions; //Set config options
+	CLAMP(options.samples,1,D3D11_MAX_MULTISAMPLE_SAMPLE_COUNT);
+	CLAMP(options.aniso,0,16);
+	CLAMP(options.VSync,0,1);
+	CLAMP(options.LODBias,-10,10);
+	UD3D11RenderDevice::debugs("Initializing Direct3D.");
+
+	UINT flags=0;
+	#ifdef _DEBUGDX
+		flags = D3D11_CREATE_DEVICE_DEBUG; //debug runtime (prints debug messages)
+	#endif
+
+	hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,featureLevels, sizeof(featureLevels)/sizeof(D3D_FEATURE_LEVEL), D3D11_SDK_VERSION, &D3DObjects.device, NULL, &D3DObjects.deviceContext);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating device.");
+		return 0;
+	}
+
+	//Get the factory that created the device
+	IDXGIDevice1 * pDXGIDevice;
+	hr = D3DObjects.device->QueryInterface(__uuidof(IDXGIDevice1), (void **)&pDXGIDevice);
+      
+	IDXGIAdapter1 * pDXGIAdapter;
+	hr = pDXGIDevice->GetParent(__uuidof(IDXGIAdapter1), (void **)&pDXGIAdapter);
+
+	IDXGIFactory1 * pIDXGIFactory;
+	hr = pDXGIAdapter->GetParent(__uuidof(IDXGIFactory1), (void **)&pIDXGIFactory);
+	D3DObjects.factory = pIDXGIFactory;
+	SAFE_RELEASE(pDXGIDevice);
+	SAFE_RELEASE(pDXGIAdapter);
+	SAFE_RELEASE(pIDXGIFactory);
+
+	if(!D3D::findAALevel()) //Clamp MSAA option to max supported level.
+		return 0;
+
+	//Create device and swap chain
+	DXGI_SWAP_CHAIN_DESC sd;
+	ZeroMemory( &sd, sizeof( sd ) );
+	sd.BufferCount = 1;
+	//sd.BufferDesc.Width = Window::getWidth();
+	//sd.BufferDesc.Height = Window::getHeight();
+	sd.BufferDesc.Format = BACKBUFFER_FORMAT;
+	//sd.BufferDesc.RefreshRate.Numerator = 60;
+	//sd.BufferDesc.RefreshRate.Denominator = 1;
+	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	sd.OutputWindow = hWnd;
+	sd.SampleDesc.Count = options.samples;
+	sd.SampleDesc.Quality = 0;
+	sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+	sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+	sd.Windowed = TRUE;
+
+	//Create a swap chain
+	//hr = D3D11CreateDeviceAndSwapChain(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,featureLevels, sizeof(featureLevels)/sizeof(D3D_FEATURE_LEVEL), D3D11_SDK_VERSION,&sd,&D3DObjects.swapChain, &D3DObjects.device, NULL, &D3DObjects.deviceContext);	
+	hr = D3DObjects.factory->CreateSwapChain(D3DObjects.device,&sd,&D3DObjects.swapChain);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating swap chain");
+		return 0;
+	}
+	D3DObjects.factory->MakeWindowAssociation(hWnd,DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_PRINT_SCREEN |DXGI_MWA_NO_ALT_ENTER); //Stop DXGI from interfering with the game
+	D3DObjects.swapChain->GetContainingOutput(&D3DObjects.output);
+		
+	//Create the effect we'll be using
+	ID3D10Blob* blob;
+	ID3D10Blob* effectBlob;
+	DWORD dwShaderFlags = D3D10_SHADER_ENABLE_STRICTNESS;
+	
+	//Set shader macro options
+	#define OPTION_TO_STRING(x) char buf##x[10];_itoa_s(options.##x,buf##x,10,10);
+	#define OPTIONSTRING_TO_SHADERVAR(x,y) {y,buf##x}
+	OPTION_TO_STRING(aniso);
+	OPTION_TO_STRING(LODBias);
+	OPTION_TO_STRING(zNear);
+	OPTION_TO_STRING(samples);
+	OPTION_TO_STRING(POM);
+	OPTION_TO_STRING(alphaToCoverage);
+	
+	D3D10_SHADER_MACRO macros[] = {
+	OPTIONSTRING_TO_SHADERVAR(aniso,"NUM_ANISO"),
+	OPTIONSTRING_TO_SHADERVAR(LODBias,"LODBIAS"),
+	OPTIONSTRING_TO_SHADERVAR(zNear,"Z_NEAR"),
+	OPTIONSTRING_TO_SHADERVAR(samples,"SAMPLES"),
+	OPTIONSTRING_TO_SHADERVAR(POM,"POM_ENABLED"),
+	OPTIONSTRING_TO_SHADERVAR(alphaToCoverage,"ALPHA_TO_COVERAGE_ENABLED"),
+	NULL};
+	
+
+	hr = D3DX11CompileFromFile(L"D3D11drv\\unreal.fx",macros,NULL,"","fx_5_0",dwShaderFlags,NULL,NULL,&effectBlob,&blob,NULL);
+	if(blob) //Show compile warnings/errors if present
+			UD3D11RenderDevice::debugs((char*) blob->GetBufferPointer());		
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error compiling shader file. Please make sure unreal.fx resides in the \"\\system\\D3D11drv\" directory.");		
+		return 0;
+	}
+	hr = D3DX11CreateEffectFromMemory(effectBlob->GetBufferPointer(),effectBlob->GetBufferSize(),NULL,D3DObjects.device->GetFeatureLevel(),D3DObjects.device,&D3DObjects.effect);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating effect from shader.");		
+		return 0;
+	}
+
+	SAFE_RELEASE(blob);
+	SAFE_RELEASE(effectBlob);
+
+	//Get shader params
+	shaderVars.projection = D3DObjects.effect->GetVariableByName("projection")->AsMatrix();
+	shaderVars.projectionMode = D3DObjects.effect->GetVariableByName("projectionMode")->AsScalar(); 	
+	shaderVars.flashColor = D3DObjects.effect->GetVariableByName("flashColor")->AsVector();
+	shaderVars.flashEnable = D3DObjects.effect->GetVariableByName("flashEnable")->AsScalar();
+	shaderVars.useTexturePass = D3DObjects.effect->GetVariableByName("useTexturePass")->AsScalar();
+	shaderVars.shaderTextures = D3DObjects.effect->GetVariableByName("textures")->AsShaderResource();
+	shaderVars.time = D3DObjects.effect->GetVariableByName("time")->AsScalar();
+	shaderVars.viewportHeight = D3DObjects.effect->GetVariableByName("viewportHeight")->AsScalar();
+	shaderVars.viewportWidth = D3DObjects.effect->GetVariableByName("viewportWidth")->AsScalar();
+	shaderVars.brightness = D3DObjects.effect->GetVariableByName("brightness")->AsScalar();
+	shaderVars.fogColor = D3DObjects.effect->GetVariableByName("fogColor")->AsVector();
+	shaderVars.fogDist = D3DObjects.effect->GetVariableByName("fogDist")->AsScalar();
+
+	//Get states
+	D3DObjects.effect->GetVariableByName("dstate_Enable")->AsDepthStencil()->GetDepthStencilState(0,&states.dstate_Enable);
+	D3DObjects.effect->GetVariableByName("dstate_Disable")->AsDepthStencil()->GetDepthStencilState(0,&states.dstate_Disable);
+	D3DObjects.effect->GetVariableByName("bstate_Translucent")->AsBlend()->GetBlendState(0,&states.bstate_Translucent);
+	D3DObjects.effect->GetVariableByName("bstate_Modulate")->AsBlend()->GetBlendState(0,&states.bstate_Modulate);
+	D3DObjects.effect->GetVariableByName("bstate_NoBlend")->AsBlend()->GetBlendState(0,&states.bstate_NoBlend);
+	D3DObjects.effect->GetVariableByName("bstate_Masked")->AsBlend()->GetBlendState(0,&states.bstate_Masked);
+	D3DObjects.effect->GetVariableByName("bstate_Alpha")->AsBlend()->GetBlendState(0,&states.bstate_Alpha);
+	D3DObjects.effect->GetVariableByName("bstate_Invis")->AsBlend()->GetBlendState(0,&states.bstate_Invis);
+	
+	//Apply shader variable options
+	setBrightness(options.brightness);
+
+	//Set the vertex layout
+    D3D11_INPUT_ELEMENT_DESC layoutDesc[] =
+    {
+		{ "POSITION",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,   D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "COLOR",   0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,   D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "COLOR",   1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,   D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "NORMAL",     0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     1, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     2, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     3, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     4, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "BLENDINDICES", 0, DXGI_FORMAT_R32_UINT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+    UINT numElements = sizeof(layoutDesc) / sizeof(layoutDesc[0]);
+
+    //Create the input layout.
+	D3DX11_PASS_DESC passDesc;
+	ID3DX11EffectTechnique* t = D3DObjects.effect->GetTechniqueByIndex(0);
+	if(!t->IsValid())
+	{
+		UD3D11RenderDevice::debugs("Failed to find technique 0.");
+		return 0;
+	}
+	ID3DX11EffectPass* p = t->GetPassByIndex(0);
+	if(!p->IsValid())
+	{
+		UD3D11RenderDevice::debugs("Failed to find pass 0.");
+		return 0;
+	}
+	p->GetDesc(&passDesc);
+	hr = D3DObjects.device->CreateInputLayout(layoutDesc, numElements, passDesc.pIAInputSignature, passDesc.IAInputSignatureSize, &D3DObjects.vertexLayout);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating input layout.");
+		return 0;
+	}
+	
+	//Set up vertex buffer
+	D3D11_BUFFER_DESC bufferDesc;
+    bufferDesc.Usage            = D3D11_USAGE_DYNAMIC;
+    bufferDesc.ByteWidth        = sizeof(Vertex)*V_BUFFER_SIZE ;
+    bufferDesc.BindFlags        = D3D11_BIND_VERTEX_BUFFER;
+    bufferDesc.CPUAccessFlags   = D3D11_CPU_ACCESS_WRITE;
+    bufferDesc.MiscFlags        = 0;
+	
+	hr=D3DObjects.device->CreateBuffer( &bufferDesc,NULL, &D3DObjects.vertexBuffer );
+    if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating vertex buffer.");
+		return 0;
+	}
+
+	//Create index buffer
+	bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+	bufferDesc.ByteWidth = sizeof(int)*I_BUFFER_SIZE;
+	bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	bufferDesc.CPUAccessFlags   = D3D11_CPU_ACCESS_WRITE;
+    bufferDesc.MiscFlags        = 0;
+	hr = D3DObjects.device->CreateBuffer( &bufferDesc,NULL, &D3DObjects.indexBuffer);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating index buffer.");
+		return 0;
+	}
+
+#ifdef _DEBUGDX
+	//Disable certain debug output
+	ID3D11InfoQueue * pInfoQueue;
+	D3DObjects.device->QueryInterface( __uuidof(ID3D11InfoQueue),  (void **)&pInfoQueue );
+
+	//set up the list of messages to filter
+	D3D11_MESSAGE_ID messageIDs [] = { D3D11_MESSAGE_ID_DEVICE_DRAW_SHADERRESOURCEVIEW_NOT_SET,
+		D3D11_MESSAGE_ID_PSSETSHADERRESOURCES_UNBINDDELETINGOBJECT,
+		D3D11_MESSAGE_ID_OMSETRENDERTARGETS_UNBINDDELETINGOBJECT,
+		D3D11_MESSAGE_ID_CHECKFORMATSUPPORT_FORMAT_DEPRECATED};
+
+	//set the DenyList to use the list of messages
+	D3D11_INFO_QUEUE_FILTER filter = { 0 };
+	filter.DenyList.NumIDs = sizeof(messageIDs);
+	filter.DenyList.pIDList = messageIDs;
+
+	//apply the filter to the info queue
+	pInfoQueue->AddStorageFilterEntries( &filter ); 
+	SAFE_RELEASE(pInfoQueue);
+
+#endif
+
+	return 1;
+}
+
+/**
+Create a render target view from the backbuffer and depth stencil buffer.
+*/
+int D3D::createRenderTargetViews()
+{
+	HRESULT hr;
+
+	//Backbuffer
+	ID3D11Texture2D* pBuffer;
+	hr = D3DObjects.swapChain->GetBuffer( 0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBuffer );
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error getting swap chain buffer.");
+		return 0;
+	}
+	
+	hr = D3DObjects.device->CreateRenderTargetView(pBuffer,NULL,&D3DObjects.renderTargetView );
+	SAFE_RELEASE(pBuffer);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating render target view (back).");
+		return 0;
+	}
+
+	DXGI_SWAP_CHAIN_DESC scd;
+	D3DObjects.swapChain->GetDesc(&scd);
+	
+
+	//Depth stencil
+	D3D11_TEXTURE2D_DESC descDepth;
+	
+	//Internal texture
+	ID3D11Texture2D *depthTexInternal;
+	descDepth.Width = scd.BufferDesc.Width;
+	descDepth.Height = scd.BufferDesc.Height;
+	descDepth.MipLevels = 1;
+	descDepth.ArraySize = 1;
+	descDepth.Format =  DXGI_FORMAT_D32_FLOAT;
+	descDepth.SampleDesc.Count = options.samples;
+	descDepth.SampleDesc.Quality = 0;
+	descDepth.Usage = D3D11_USAGE_DEFAULT;
+	descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	descDepth.CPUAccessFlags = 0;
+	descDepth.MiscFlags = 0;
+	if(FAILED(D3DObjects.device->CreateTexture2D( &descDepth, NULL,&depthTexInternal )))
+	{
+		UD3D11RenderDevice::debugs("Depth texture creation failed.");
+		return 0;
+	}
+
+	//Depth Stencil view
+	D3D11_DEPTH_STENCIL_VIEW_DESC descDSV;
+	descDSV.Format = descDepth.Format;
+	descDSV.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
+	descDSV.Flags = 0;
+	if(FAILED(D3DObjects.device->CreateDepthStencilView(depthTexInternal,&descDSV,&D3DObjects.depthStencilView )))
+	{
+		UD3D11RenderDevice::debugs("Error creating render target view (depth).");
+		return 0;
+	}
+	SAFE_RELEASE(depthTexInternal);
+	
+	return 1;
+}
+
+
+/**
+Cleanup
+*/
+void D3D::uninit()
+{
+	UD3D11RenderDevice::debugs("Uninit.");
+	D3D::flush();
+	D3DObjects.swapChain->SetFullscreenState(FALSE,NULL); //Go windowed so swapchain can be released
+
+	if(D3DObjects.deviceContext)
+		D3DObjects.deviceContext->ClearState();
+	D3DObjects.deviceContext->Flush();
+
+	SAFE_RELEASE(D3DObjects.vertexLayout);
+	SAFE_RELEASE(D3DObjects.vertexBuffer);
+	SAFE_RELEASE(D3DObjects.indexBuffer);
+	SAFE_RELEASE(D3DObjects.effect);
+	SAFE_RELEASE(states.dstate_Enable);
+	SAFE_RELEASE(states.dstate_Disable);
+	SAFE_RELEASE(states.bstate_NoBlend);
+	SAFE_RELEASE(states.bstate_Translucent);
+	SAFE_RELEASE(states.bstate_Modulate);
+	SAFE_RELEASE(states.bstate_Alpha);
+	SAFE_RELEASE(D3DObjects.renderTargetView);
+	SAFE_RELEASE(D3DObjects.depthStencilView);
+	SAFE_RELEASE(D3DObjects.swapChain);
+	SAFE_RELEASE(D3DObjects.device);
+	SAFE_RELEASE(D3DObjects.deviceContext);
+	SAFE_RELEASE(D3DObjects.output);
+	SAFE_RELEASE(D3DObjects.factory);
+	UD3D11RenderDevice::debugs("Bye.");
+}
+
+
+/**
+Set resolution and windowed/fullscreen.
+
+\note DX10 is volatile; the order in which the steps are taken is critical.
+*/
+int D3D::resize(int X, int Y, bool fullScreen)
+{		
+
+	#ifdef _DEBUG
+	printf("%d %d %d\n",X,Y,fullScreen);
+	#endif
+	HRESULT hr;
+	DXGI_SWAP_CHAIN_DESC sd;
+
+	switchToPass(-1); //Switch to no pass so stuff will be rebound later.
+
+	//Get swap chain description
+	hr = D3DObjects.swapChain->GetDesc(&sd);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Failed to get swap chain description.");
+		return 0;
+	}
+	sd.BufferDesc.Width = X; //Set these so we can use this for getclosestmatchingmode
+	sd.BufferDesc.Height = Y;
+
+	SAFE_RELEASE(D3DObjects.renderTargetView); //Release render target view
+	SAFE_RELEASE(D3DObjects.depthStencilView);
+
+	//Set fullscreen resolution
+	if(fullScreen)
+	{
+		if(FAILED(hr))
+		{
+			UD3D11RenderDevice::debugs("Failed to get output adapter.");
+			return 0;
+		}
+		DXGI_MODE_DESC fullscreenMode = sd.BufferDesc;
+		//hr = D3DObjects.output->FindClosestMatchingMode(&sd.BufferDesc,&fullscreenMode,D3DObjects.device);
+		if(FAILED(hr))
+		{
+			UD3D11RenderDevice::debugs("Failed to get matching display mode.");
+			return 0;
+		}
+		hr = D3DObjects.swapChain->ResizeTarget(&fullscreenMode);
+		if(FAILED(hr))
+		{
+			UD3D11RenderDevice::debugs("Failed to set full-screen resolution.");
+			return 0;
+		}
+		hr = D3DObjects.swapChain->SetFullscreenState(TRUE,NULL);
+		if(FAILED(hr))
+		{
+			UD3D11RenderDevice::debugs("Failed to switch to full-screen.");
+			//return 0;
+		}
+		//MS recommends doing this
+		fullscreenMode.RefreshRate.Denominator=0;
+		fullscreenMode.RefreshRate.Numerator=0;
+		hr = D3DObjects.swapChain->ResizeTarget(&fullscreenMode);
+		if(FAILED(hr))
+		{
+			UD3D11RenderDevice::debugs("Failed to set full-screen resolution.");
+			return 0;
+		}
+		sd.BufferDesc = fullscreenMode;
+	}	
+
+	//This must be done after fullscreen stuff or blitting will be used instead of flipping
+	hr = D3DObjects.swapChain->ResizeBuffers(sd.BufferCount,X,Y,sd.BufferDesc.Format,sd.Flags); //Resize backbuffer
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Failed to resize back buffer.");
+		return 0;
+	}
+	if(!createRenderTargetViews()) //Recreate render target view
+	{
+		return 0;
+	}
+	
+	//Reset viewport, it's sometimes lost.
+	D3D11_VIEWPORT vp;
+	vp.Width = X;
+	vp.Height = Y;
+	vp.MinDepth = 0.0;
+	vp.MaxDepth = 1.0;
+	vp.TopLeftX = 0;
+	vp.TopLeftY = 0;
+	D3DObjects.deviceContext->RSSetViewports(1,&vp);
+	return 1;
+}
+
+/**
+Set up things for rendering a new frame. For example, update shader time.
+*/
+void D3D::newFrame()
+{	
+	static float time;
+	shaderVars.time->SetFloat(time);
+	time += TIME_STEP;
+}
+
+/**
+Clear backbuffer(s)
+\param clearColor The color with which the screen is cleared.
+*/
+void D3D::clear(D3D::Vec4& clearColor)
+{
+	D3DObjects.deviceContext->ClearRenderTargetView(D3DObjects.renderTargetView,(float*) &clearColor);
+}
+
+/**
+Clear depth
+*/
+void D3D::clearDepth()
+{
+	commit();
+	D3DObjects.deviceContext->ClearDepthStencilView(D3DObjects.depthStencilView, D3D11_CLEAR_DEPTH, 1.0, 0);
+}
+
+/**
+Memory map index and vertex buffer for writing.
+
+\param Clear Sets whether the buffer is restarted from the beginning;
+This is done when the buffers are about to overflow, and at the start of a new frame (Microsoft recommendation).
+*/
+void D3D::map(bool clear)
+{	
+	HRESULT hr, hr2;
+	if(mappedIBuffer.pData!=NULL||mappedVBuffer.pData!=NULL)
+	{
+		//UD3D11RenderDevice::debugs("map() without render");
+		return;
+	}
+
+	D3D11_MAP m;
+	if(clear)
+	{
+		numVerts=0;
+		numIndices=0;
+		numUndrawnIndices=0;
+		m = D3D11_MAP_WRITE_DISCARD;
+	}
+	else
+	{
+		m = D3D11_MAP_WRITE_NO_OVERWRITE;
+	}
+	
+	hr=D3DObjects.deviceContext->Map(D3DObjects.vertexBuffer,0,m,0,&mappedVBuffer);
+	hr2=D3DObjects.deviceContext->Map(D3DObjects.indexBuffer,0,m,0,&mappedIBuffer);
+	if(FAILED(hr) || FAILED(hr2))
+	{
+		UD3D11RenderDevice::debugs("Failed to map index and/or vertex buffer.");
+	}
+}
+
+/**
+Draw current buffer contents.
+*/
+void D3D::render()
+{	
+	if(mappedVBuffer.pData==NULL || mappedIBuffer.pData == NULL) //No buffer mapped, do nothing
+	{
+		return;
+	}
+
+	D3DObjects.deviceContext->Unmap(D3DObjects.vertexBuffer,0);
+	mappedVBuffer.pData=NULL;
+	D3DObjects.deviceContext->Unmap(D3DObjects.indexBuffer,0);
+	mappedIBuffer.pData=NULL;
+/*
+	static unsigned int maxi;
+	if(numUndrawnIndices>maxi)
+	{
+		maxi=numUndrawnIndices;
+		printf("%d\n",maxi);
+	}
+*/
+	//This shouldn't happen ever, but if it does we crash (negative amount of indices for draw()), so let's check anyway
+	if(numIndices<numUndrawnIndices)
+	{
+		UD3D11RenderDevice::debugs("Buffer error.");
+		numUndrawnIndices=0;
+		return;
+	}
+
+	D3D::switchToPass(0)->Apply(0,D3DObjects.deviceContext);
+	D3DObjects.deviceContext->DrawIndexed(numUndrawnIndices,numIndices-numUndrawnIndices,0);
+
+	numUndrawnIndices=0;
+}
+
+/**
+Commit buffered polys; i.e. draw and remap. Do this before changing state.
+*/
+void D3D::commit()
+{
+	if(numUndrawnIndices>0)
+	{
+		render();
+		map(false);
+	}
+}
+
+/**
+Set up render targets, textures, etc. for the chosen pass.
+\param index The number of the pass.
+*/
+ID3DX11EffectPass *D3D::switchToPass(int index)
+{
+	static int currIndex=-1;
+
+	ID3DX11EffectPass* ret = NULL;
+	if(index!=-1)
+			ret = D3DObjects.effect->GetTechniqueByIndex(0)->GetPassByIndex(index);
+
+	if(index!=currIndex)
+	{
+		UINT stride;
+		UINT offset;
+		
+		switch (index)
+		{
+			case 0: //Geometry
+			{
+				stride=sizeof(Vertex);
+				offset = 0;
+				D3DObjects.deviceContext->IASetInputLayout(D3DObjects.vertexLayout);
+				D3DObjects.deviceContext->IASetVertexBuffers( 0, 1, &D3DObjects.vertexBuffer, &stride, &offset );
+				D3DObjects.deviceContext->IASetIndexBuffer(D3DObjects.indexBuffer,DXGI_FORMAT_R32_UINT,0);
+				D3DObjects.deviceContext->OMSetRenderTargets(1,&D3DObjects.renderTargetView,D3DObjects.depthStencilView);	
+				D3DObjects.deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				break;
+			}
+		}
+		currIndex = index;
+
+	}
+	return ret;
+}
+
+/**
+Postprocess and Flip
+*/
+void D3D::present()
+{
+	HRESULT hr;
+	hr = D3DObjects.swapChain->Present((options.VSync!=0),0);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Present error.");
+		return;
+	}
+}
+
+
+/**
+Generate index data so a triangle fan with 'num' vertices is converted to a triangle list. Should be called BEFORE those vertices are buffered.
+\param num Number of vertices in the triangle fan.
+*/
+void D3D::indexTriangleFan(int num)
+{		
+	//Make sure there's index and vertex buffer room for a triangle fan; if not, the current buffer content is drawn and discarded
+	//Index buffer is checked only, as there's equal or more indices than vertices. There.s 3*(n-1) indices for n vertices.
+	int newIndices = (num-2)*3;
+	
+	if(numIndices+newIndices>I_BUFFER_SIZE)
+	{
+		D3D::render();
+		D3D::map(true);	
+	}
+
+	//Generate fan indices
+	int* iBufPtr = (int*)mappedIBuffer.pData;
+	for(int i=1;i<num-1;i++)
+	{
+		iBufPtr[numIndices++] = numVerts; //Center point
+		iBufPtr[numIndices++] = numVerts+i;
+		iBufPtr[numIndices++] = numVerts+i+1;		
+	}
+
+	numUndrawnIndices += newIndices;
+}
+
+/**
+Generate index data for a quad. See indexTriangleFan().
+*/
+void D3D::indexQuad()
+{	
+	const int newIndices = 6;
+	if(numIndices+newIndices>I_BUFFER_SIZE)
+	{
+		D3D::render();
+		D3D::map(true);	
+	}
+	int* iBufPtr = (int*) mappedIBuffer.pData;
+	iBufPtr[numIndices++] = numVerts;
+	iBufPtr[numIndices++] = numVerts+1;
+	iBufPtr[numIndices++] = numVerts+2;
+	iBufPtr[numIndices++] = numVerts+2;
+	iBufPtr[numIndices++] = numVerts+3;
+	iBufPtr[numIndices++] = numVerts;
+
+	numUndrawnIndices += newIndices;
+}
+
+/**
+Set up the viewport. Also sets height and width in shader.
+\note Buffered polys must be committed first, otherwise glitches will occur (for example, Deus Ex security cams).
+*/
+void D3D::setViewPort(int X, int Y, int left, int top)
+{
+	static int oldX, oldY, oldLeft, oldTop;
+	if(X!=oldX || Y!=oldY || left != oldLeft || top != oldTop)
+	{
+		
+		commit();
+
+		D3D11_VIEWPORT vp;
+		vp.Width = X;
+		vp.Height = Y;
+		vp.MinDepth = 0.0;
+		vp.MaxDepth = 1.0;
+		vp.TopLeftX = left;
+		vp.TopLeftY = top;
+
+		D3DObjects.deviceContext->RSSetViewports(1,&vp);
+		shaderVars.viewportHeight->SetFloat(Y);
+		shaderVars.viewportWidth->SetFloat(X);
+	}
+	oldLeft = left; oldTop = top; oldX = X; oldY = Y;
+}
+
+/**
+Returns a pointer to the next vertex in the buffer; this can then be set to buffer a model etc.
+\return Vertex pointer.
+*/
+D3D::Vertex *D3D::getVertex()
+{
+	//Return a pointer to a vertex which can be filled in.
+	return (D3D::Vertex*) &((D3D::Vertex*)mappedVBuffer.pData)[numVerts++];
+}
+
+/**
+Set projection matrix parameters.
+\param aspect The viewport aspect ratio.
+\param XoverZ Ratio between frustum X and Z. Projection parameters are for z=1, so x over z gives x coordinate; and x/z*aspect=y/z=y.
+*/
+void D3D::setProjection(float aspect, float XoverZ)
+{
+	XMMATRIX m;
+	static float oldAspect, oldXoverZ;
+	if(aspect!=oldAspect || oldXoverZ != XoverZ)
+	{
+		commit();
+		float xzProper = XoverZ*options.zNear; //Scale so larger near Z does not lead to zoomed in view
+		m = XMMatrixPerspectiveOffCenterLH(-xzProper,xzProper,-aspect*xzProper,aspect*xzProper,options.zNear, 32760.0f); //Similar to glFrustum
+		shaderVars.projection->SetMatrix(&m.m[0][0]);
+		oldAspect = aspect;
+		oldXoverZ = XoverZ;
+	}
+}
+
+/*
+Set shader projection mode. Only changes setting if new parameter differs from current state.
+\param mode Mode (see D3D::ProjectionMode)
+\note It's best to call this at the start of each type of primitive draw call, and not for instance before and after drawing a tile.
+The 2nd option results in a switch every time instead of only when starting to draw another primitive type.
+*/
+void D3D::setProjectionMode(D3D::ProjectionMode mode)
+{
+	static D3D::ProjectionMode m;
+	if(m!=mode)
+	{
+		commit();
+		shaderVars.projectionMode->SetInt(mode);
+		m= mode;
+	}
+}
+
+
+/** Handle flags that change depth or blend state. See polyflags.h.
+Only done if flag is different from current.
+If there's any buffered geometry, it will drawn before setting the new flags.
+\param flags Unreal polyflags.
+\param D3Dflags Custom flags defined in D3D.h.
+\note Bottleneck; make sure buffers are only rendered due to flag changes when absolutely necessary	
+\note Deus Ex requires other different precedence rules for holoconvos with glasses-wearing characters to look good.
+**/
+void D3D::setFlags(int flags, int D3DFlags)
+{
+	const int BLEND_FLAGS = PF_Translucent | PF_Modulated |PF_Invisible |PF_Masked
+	#ifdef RUNE
+		| PF_AlphaBlend
+	#endif
+		;
+	const int RELEVANT_FLAGS = BLEND_FLAGS|PF_Occlude;
+	const int RELEVANT_D3D_FLAGS = 0;
+	
+	static int currFlags=0;
+	static int currD3DFlags;
+
+	
+	if(!(flags & (PF_Translucent|PF_Modulated))) //If none of these flags, occlude (opengl renderer)
+	{
+		flags |= PF_Occlude;
+	}
+
+	int changedFlags = currFlags ^ flags;
+	int changedD3DFlags = currD3DFlags ^ D3DFlags;
+	if (changedFlags&RELEVANT_FLAGS || changedD3DFlags & RELEVANT_D3D_FLAGS) //only blend flag changes are relevant	
+	{
+		commit();
+
+		//Set blend state		
+		if(changedFlags & BLEND_FLAGS) //Only set blend state if it actually changed
+		{
+			ID3D11BlendState *blendState;
+			if(flags&PF_Invisible)
+			{
+				blendState = states.bstate_Invis;
+			}
+			#ifdef DEUSEX
+			else if(flags&PF_Modulated)
+			{				
+				blendState = states.bstate_Modulate;
+			}
+			else if(flags&PF_Translucent)
+			{
+				blendState = states.bstate_Translucent;
+			}		 
+			#else
+			else if(flags&PF_Translucent)
+			{
+				blendState = states.bstate_Translucent;
+			}
+			else if(flags&PF_Modulated)
+			{				
+				blendState = states.bstate_Modulate;
+			}
+			#endif
+						
+			#ifdef RUNE
+			else if (flags&PF_AlphaBlend)
+			{
+				blendState = states.bstate_Alpha;
+			}
+			#endif
+			else if (flags&PF_Masked)
+			{
+				blendState = states.bstate_Masked;
+			}
+			else
+			{
+				blendState = states.bstate_NoBlend;
+			}
+			D3DObjects.deviceContext->OMSetBlendState(blendState,NULL,0xffffffff);
+	
+		}
+		
+		//Set depth state
+		if(changedFlags & PF_Occlude)
+		{
+			ID3D11DepthStencilState *depthState;
+			if(flags & PF_Occlude)
+				depthState = states.dstate_Enable;
+			else
+				depthState = states.dstate_Disable;
+			D3DObjects.deviceContext->OMSetDepthStencilState(depthState,1);
+		}
+
+		currFlags = flags;
+		currD3DFlags = D3DFlags;
+	}
+}
+
+/**
+Create a texture from a descriptor and data to fill it with.
+\param desc Direct3D texture description.
+\param data Data to fill the texture with.
+*/
+ID3D11Texture2D *D3D::createTexture(D3D11_TEXTURE2D_DESC &desc, D3D11_SUBRESOURCE_DATA &data)
+{
+	//Creates a texture, setting the TextureInfo's data member.
+	HRESULT hr;	
+
+	ID3D11Texture2D *texture;
+	hr=D3DObjects.device->CreateTexture2D(&desc,&data, &texture);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating texture resource.");
+		return NULL;
+	}
+	return texture;
+}
+
+/**
+Update a single texture mip using a copy operation.
+\param id CacheID to insert texture with.
+\param mipNum Mip level to update.
+\param data Data to write to the mip.
+*/
+void D3D::updateMip(DWORD64 id,int mipNum,D3D11_SUBRESOURCE_DATA &data)
+{
+	ID3D11Resource* resource;
+
+	//If texture is currently bound, draw buffers before updating
+	for(int i=0;i<D3D::DUMMY_NUM_PASSES;i++)
+	{
+		if(texturePasses.boundTextureID[i]==id)
+		{
+			commit();
+			break;
+		}
+	}
+
+	//Update
+	(&textureCache[id])->resourceView->GetResource(&resource);
+	D3DObjects.deviceContext->UpdateSubresource(resource,mipNum,NULL,(void*) data.pSysMem,data.SysMemPitch,0);
+
+}
+
+/**
+Create a resource view (texture usable by shader) from a filled-in texture and cache it. Caller can then release the texture.
+\param id CacheID to insert texture with.
+\param metadata Texture metadata.
+\param tex A filled Direct3D texture.
+*/
+void D3D::cacheTexture(unsigned __int64 id,TextureMetaData &metadata,ID3D11Texture2D *tex)
+{
+	HRESULT hr;
+
+	D3D11_TEXTURE2D_DESC desc;
+	tex->GetDesc(&desc);
+	//Create resource view
+	ID3D11ShaderResourceView* r;
+	D3D11_SHADER_RESOURCE_VIEW_DESC srDesc;
+	srDesc.Format = desc.Format;
+	srDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	srDesc.Texture2D.MostDetailedMip = 0;
+	srDesc.Texture2D.MipLevels = desc.MipLevels;
+
+	hr = D3DObjects.device->CreateShaderResourceView(tex,&srDesc,&r);
+	if(FAILED(hr))
+	{
+		UD3D11RenderDevice::debugs("Error creating texture shader resource view.");
+		return;
+	}
+
+	//Cache texture
+	D3D::CachedTexture c;
+	c.metadata = metadata;
+	c.resourceView = r;
+	textureCache[id]=c;	
+}
+
+/**
+Returns true if texture is in cache.
+\param id CacheID for texture.
+*/
+bool D3D::textureIsCached(DWORD64 id)
+{	
+	return textureCache.find(id) != textureCache.end();
+}
+
+/**
+Returns texture metadata.
+\param id CacheID for texture.
+*/
+D3D::TextureMetaData &D3D::getTextureMetaData(DWORD64 id)
+{
+	return textureCache[id].metadata;
+}
+
+
+/**
+Set the texture for a texture pass (diffuse, lightmap, etc).
+Texture is only set if it's not already the current one for that pass.
+Cached polygons (using the previous set of textures) are drawn before the switch is made.
+\param id CacheID for texture. NULL sets no texture for the pass (by disabling it using a shader constant).
+\return texture metadata so renderer can use parameters such as scale/pan; NULL is texture not found
+*/
+D3D::TextureMetaData *D3D::setTexture(D3D::TexturePass pass,DWORD64 id)
+{		
+	static D3D::TextureMetaData *metadata[D3D::DUMMY_NUM_PASSES]; //Cache this so it can even be returned when no texture was actually set (because same id as last time)
+	if(id!=texturePasses.boundTextureID[pass]) //If different texture than previous one, draw geometry in buffer and switch to new texture
+	{			
+		texturePasses.boundTextureID[pass]=id;
+		
+		commit();
+
+		if(id==NULL) //Turn off texture
+		{
+			texturePasses.enabled[pass]=FALSE;
+			metadata[pass]=NULL;	
+			shaderVars.useTexturePass->SetBoolArray(texturePasses.enabled,0,D3D::DUMMY_NUM_PASSES);
+		}
+		else
+		{
+			//Turn on and switch to new texture			
+			D3D::CachedTexture *tex;
+			if(!textureIsCached(id)) //Texture not in cache, conversion probably went wrong.
+				return NULL;
+			tex = &textureCache[id];			
+		
+			shaderVars.shaderTextures->SetResourceArray(&tex->resourceView,pass,1);	
+			if(!texturePasses.enabled[pass]) //Only updating this on change is faster than always doing it
+			{				
+				texturePasses.enabled[pass]=TRUE;
+				shaderVars.useTexturePass->SetBoolArray(texturePasses.enabled,0,D3D::DUMMY_NUM_PASSES); 
+			}			
+			metadata[pass] = &tex->metadata;
+		}
+		
+	}
+
+	return metadata[pass];
+}
+
+/**
+Delete a texture (so it can be overwritten with an updated one).
+*/
+void D3D::deleteTexture(DWORD64 id)
+{
+	stdext::hash_map<DWORD64,D3D::CachedTexture>::iterator i = textureCache.find(id);
+	if(i==textureCache.end())
+		return;
+	SAFE_RELEASE(i->second.resourceView);
+	textureCache.erase(i);
+}
+
+/**
+Clear texture cache.
+*/
+void D3D::flush()
+{
+	for(int i=0;i<D3D::DUMMY_NUM_PASSES;i++)
+	{
+		setTexture((D3D::TexturePass)i,NULL);
+	}
+
+	//Delete textures
+	for(stdext::hash_map<DWORD64,D3D::CachedTexture>::iterator i=textureCache.begin();i!=textureCache.end();i++)
+	{	
+		while(i->second.resourceView)
+			SAFE_RELEASE(i->second.resourceView);
+	}
+	textureCache.clear();
+}
+
+
+/**
+Notify the shader a flash effect should be drawn.
+*/
+void D3D::flash(bool enable, D3D::Vec4 &color)
+{	
+	shaderVars.flashEnable->SetBool(enable);
+	if(enable)
+		shaderVars.flashColor->SetFloatVector((float*)&color);
+}
+
+/**
+Set the shader's fog settings.
+*/
+void D3D::fog(float dist, D3D::Vec4 *color)
+{
+	commit(); //Draw previous stuff that required different fog settings.
+	shaderVars.fogDist->SetFloat(dist);
+	if(dist>0)
+	{		
+		shaderVars.fogColor->SetFloatVector((float*)color);
+	}
+}
+
+/**
+Create a string of supported display modes.
+\return String of modes. Caller must delete[] this.
+\note No error checking.
+\note Deus Ex and Unreal (non-Gold) only show 16 resolutions, so for it make it the 16 highest ones. Also for Unreal Gold for compatibity with v226.
+*/	
+TCHAR *D3D::getModes()
+{
+	TCHAR *out;
+
+	//Get number of modes
+	UINT num = 0;	
+	D3DObjects.output->GetDisplayModeList(BACKBUFFER_FORMAT, NULL, &num, NULL);
+	const int resStringLength = 10;
+	out = new TCHAR[num*resStringLength+1];
+	out[0]=0;
+	
+	DXGI_MODE_DESC * descs = new DXGI_MODE_DESC[num];
+	D3DObjects.output->GetDisplayModeList(BACKBUFFER_FORMAT, NULL, &num, descs);
+	
+	//Add each mode once (disregard refresh rates etc)
+	#if( DEUSEX || UNREAL || UNREALGOLD)
+	const int maxItems = 16;
+	int h[maxItems];
+	int w[maxItems];
+	h[0]=0;
+	w[0]=0;
+	int slot=maxItems-1;
+	//Go through the modes backwards and find up to 16 ones
+	for(int i=num;i>0&&slot>0;i--)
+	{		
+		if(slot==maxItems-1 || w[slot+1]!=descs[i-1].Width || h[slot+1]!=descs[i-1].Height)
+		{
+			w[slot]=descs[i-1].Width;
+			h[slot]=descs[i-1].Height;
+			printf("%d\n",w[slot]);
+			slot--;
+		}
+	}
+	//Build the string by now going through the saved modes forwards.
+	for(int i=slot+1;i<maxItems;i++)	
+	{
+		TCHAR curr[resStringLength+1];
+		swprintf_s(curr,resStringLength+1,L"%dx%d ",w[i],h[i]);
+		wcscat_s(out,num*resStringLength+1,curr);	
+	}
+	#else
+	int height = 0;
+	int width = 0;
+	for(unsigned int i=0;i<num;i++)
+	{		
+		if(width!=descs[i].Width || height!=descs[i].Height)
+		{
+			width=descs[i].Width;
+			height=descs[i].Height;
+			TCHAR curr[resStringLength+1];
+			swprintf_s(curr,resStringLength+1,L"%dx%d ",width,height);
+			wcscat_s(out,num*resStringLength+1,curr);
+		}
+	}
+	#endif
+	
+	//Throw away trailing space
+	out[wcslen(out)-1]=0;
+	delete [] descs;
+	return out;
+}
+
+/**
+Return screen data by copying the back buffer to a staging resource and copying this into an array.
+\param buf Array in which the data will be written.
+\note No error checking.
+*/
+void D3D::getScreenshot(D3D::Vec4_byte* buf)
+{
+	ID3D11Texture2D* backBuffer;
+	D3DObjects.swapChain->GetBuffer( 0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBuffer );
+
+	D3D11_TEXTURE2D_DESC desc;
+	backBuffer->GetDesc(&desc);
+	desc.BindFlags = 0;
+	desc.SampleDesc.Count=1;
+
+	//Need to take two steps as backbuffer can be multisampled: copy backbuffer to default and default to staging. Could be skipped for performance level > 10.1
+	//Copy backbuffer
+	ID3D11Texture2D* tdefault;
+	ID3D11Texture2D* tstaging;
+	desc.CPUAccessFlags = 0;
+	desc.Usage = D3D11_USAGE_DEFAULT;
+	D3DObjects.device->CreateTexture2D(&desc,NULL,&tdefault);
+	desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	desc.Usage = D3D11_USAGE_STAGING;
+	D3DObjects.device->CreateTexture2D(&desc,NULL,&tstaging);	
+	D3DObjects.deviceContext->ResolveSubresource(tdefault,0,backBuffer,0,BACKBUFFER_FORMAT);
+	D3DObjects.deviceContext->CopySubresourceRegion(tstaging,0,0,0,0,tdefault,0,NULL);
+	
+
+	//Map copy
+	D3D11_MAPPED_SUBRESOURCE tempMapped;
+	D3DObjects.deviceContext->Map(tstaging,0,D3D11_MAP_READ,0,&tempMapped);
+
+	//Convert BGRA to RGBA, minding the source stride.
+	D3D::Vec4_byte* rowSrc =(D3D::Vec4_byte*) tempMapped.pData;
+	D3D::Vec4_byte* rowDst = buf;
+	for(unsigned int row=0;row<desc.Height;row++)
+	{
+		for(unsigned int col=0;col<desc.Width;col++)
+		{
+			rowDst[col].x = rowSrc[col].z;
+			rowDst[col].y = rowSrc[col].y;
+			rowDst[col].z = rowSrc[col].x;
+			rowDst[col].w = rowSrc[col].w;	
+		}
+		//Go to next row
+		rowSrc+=(tempMapped.RowPitch/sizeof(D3D::Vec4_byte));
+		rowDst+=desc.Width;
+		
+	}
+
+	//Clean up
+	D3DObjects.deviceContext->Unmap(tstaging,0);
+	SAFE_RELEASE(backBuffer);
+	SAFE_RELEASE(tdefault);
+	SAFE_RELEASE(tstaging);
+	UD3D11RenderDevice::debugs("Done.");
+}
+
+/**
+Find the maximum level of MSAA supported by the device and clamp the options.MSAA setting to this.
+\return 1 if succesful.
+*/
+int D3D::findAALevel()
+{
+	//Create device to check MSAA support with
+	HRESULT hr;
+
+	//Check MSAA support by going down the counts until a suitable one is found	
+	UINT levels=0;
+	int count;
+	for(count = options.samples ;levels==0&&count>0;count--)
+	{
+		hr = D3DObjects.device->CheckMultisampleQualityLevels(BACKBUFFER_FORMAT,count,&levels);
+		if(FAILED(hr))
+		{
+			UD3D11RenderDevice::debugs("Error getting MSAA support level.");
+			return 0;
+		}
+		if(levels!=0) //sample amount is supported
+			break;
+	}
+	if(count!=options.samples)
+	{
+		UD3D11RenderDevice::debugs("Anti aliasing setting decreased; requested setting unsupported.");
+		options.samples = count;
+	}
+	return 1;
+}
+
+/**
+Sets the in-shader brightness.
+\param brightness Brightness 0-1.
+*/
+void D3D::setBrightness(float brightness)
+{
+	if(shaderVars.brightness->IsValid())
+		shaderVars.brightness->SetFloat(brightness);
+}

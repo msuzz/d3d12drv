@@ -1,0 +1,59 @@
+==============================================
+D3D11DRV:
+==============================================
+
+
+Version 1
+	- Change: Dropped Unreal v244 support.
+	- Change: Ported from Direct3D 10 to Direct3D 11 (feature level 10.0).
+	- Change: Ported from D3DX10 math to XNA math.
+	- Change: Tweak to device/swap chain setup.
+
+==============================================
+D3D10DRV:
+==============================================
+
+
+Version 8
+	- Change: Built with aug. 2009 DirectX SDK.
+	- Improvement: By request, Rune 1.00 support.
+	- Change: Renamed UnrealGold package to Unreal_226_Gold.
+	- Change: Renamed Unreal package to Unreal_224.
+	- Bugfix: Limited Unreal 1 variants to only being supplied to highest 16 supported resolutions (Deus Ex style) to fix glitched options menu.
+
+Version 7
+	- Improvement: Moved some dot product calculations out of a loop (small theoretical performance increase).
+
+Version 6
+	- Change: Took out multi pass rendering as this complicated things greatly, with little payoff.
+	- Change: Auxiliary files are now stored in the 'd3d10drv' subfolder as opposed to directly in the game's 'system' directory.
+	- Improvement: Alpha to coverage support to make masked textures look nicer. Takes effect if turned on and at least 4x anti aliasing is enabled. Unfortunately, alpha to coverage makes non-tiling masked textures, such as hills in skyboxes, have seams (much effort was made to prevent this, to no avail). As such, it's only turned on by default for Deus Ex, for which this issue is almost nonexistant.
+
+Version 5
+	- Bugfix: DX: Crash on systems that support < 16 resolutions.
+	- Bugfix: Missing 2D elements on ATI cards.
+	- Improvement: Automatic FOV for Unreal (Gold).
+	- Improvement: Anti aliasing for masked surfaces.
+	- Improvement: Optional parallax occlusion mapping.
+
+Version 4
+	- Bugfix: Fixed broken LOD bias setting.
+	- Improvement: Adjusted projection handling so flickering geometry (often far away signs, like on the DX sub base) doesn't z-fight anymore.
+	- Improvement: DX: Gary Savage's glasses in A51 hologram conversation don't have white areas around them anymore (DX blend flag precedence).
+	- Improvement: UT/DX/RUNE: Automatically sets proper field of view for selected resolution.
+	- Improvement: Anisotropic filtering on masked textures.
+	- Improvement: No anti aliasing of masked world surfaces; prevents lines in for example skybox hill billboard corners.
+
+Version 3a
+	- Bugfix: Accidentally left D3D debug layer on in v3, turned it off; should prevent not starting and/or significantly decreased performance.
+
+Version 3
+	- Feature: Made texture precaching a user-configurable setting, default off.
+	- Bugfix: Fixed a rare crash bug caused by invalid polygons.
+	- Feature: Added Rune distance fog.
+
+Version 2
+	- Bugfix: Fixed glitchy mirrors by preserving invisible objects' depth.
+
+Version 1
+	- Initial release

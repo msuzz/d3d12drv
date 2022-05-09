@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<VisualStudioPropertySheet
+	ProjectType="Visual C++"
+	Version="8.00"
+	Name="Render DLL"
+	OutputDirectory="$(SolutionDir)\_work\$(ConfigurationName)"
+	IntermediateDirectory="$(SolutionDir)\_work\$(ConfigurationName)"
+	>
+	<Tool
+		Name="VCCLCompilerTool"
+		AdditionalIncludeDirectories="&quot;../games/$(GAMENAME)/engine/inc&quot;;&quot;../games/$(GAMENAME)/core/inc&quot;"
+		PreprocessorDefinitions="_REALLY_WANT_DEBUG"
+		StructMemberAlignment="3"
+		TreatWChar_tAsBuiltInType="false"
+	/>
+	<Tool
+		Name="VCLinkerTool"
+		AdditionalDependencies="../games/$(GAMENAME)/engine/lib/engine.lib ../games/$(GAMENAME)/core/lib/core.lib"
+		LinkIncremental="1"
+	/>
+	<Tool
+		Name="VCPostBuildEventTool"
+		CommandLine="mkdir &quot;$(GAMEDIR)\system\d3d11drv\&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.fx&quot; &quot;$(GAMEDIR)\system\d3d11drv&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.fxh&quot; &quot;$(GAMEDIR)\system\d3d11drv&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.png&quot; &quot;$(GAMEDIR)\system\d3d11drv&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.dll&quot; &quot;$(GAMEDIR)\system\&quot;&#x0D;&#x0A;copy &quot;$(TargetPath) &quot; &quot;$(GAMEDIR)\system\&quot;&#x0D;&#x0A;&#x0D;&#x0A;mkdir &quot;$(SolutionDir)\packages\$(GAMENAME)&quot;&#x0D;&#x0A;mkdir &quot;$(SolutionDir)\packages\$(GAMENAME)\d3d11drv\&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.fx&quot; &quot;$(SolutionDir)\packages\$(GAMENAME)\d3d11drv&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.fxh&quot; &quot;$(SolutionDir)\packages\$(GAMENAME)\d3d11drv&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.png&quot; &quot;$(SolutionDir)\packages\$(GAMENAME)\d3d11drv&quot;&#x0D;&#x0A;copy &quot;$(InputDir)\$(SolutionName).int&quot; &quot;$(SolutionDir)\packages\$(GAMENAME)&quot;&#x0D;&#x0A;copy &quot;$(InputDir)*.dll&quot;  &quot;$(SolutionDir)\packages\$(GAMENAME)&quot;&#x0D;&#x0A;copy &quot;$(TargetPath)&quot;  &quot;$(SolutionDir)\packages\$(GAMENAME)&quot;&#x0D;&#x0A;"
+	/>
+	<Tool
+		Name="VCPreBuildEventTool"
+		CommandLine=""
+	/>
+</VisualStudioPropertySheet>

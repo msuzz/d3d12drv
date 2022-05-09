@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<VisualStudioPropertySheet
+	ProjectType="Visual C++"
+	Version="8.00"
+	Name="deus ex"
+	>
+	<Tool
+		Name="VCCLCompilerTool"
+		PreprocessorDefinitions="DEUSEX"
+	/>
+	<UserMacro
+		Name="GAMENAME"
+		Value="DeusEx"
+	/>
+	<UserMacro
+		Name="GAMEDIR"
+		Value="d:\steam\steamapps\common\deus ex"
+	/>
+	<UserMacro
+		Name="GAMEEXE"
+		Value="deusex.exe"
+	/>
+</VisualStudioPropertySheet>

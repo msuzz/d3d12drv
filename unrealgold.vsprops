@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<VisualStudioPropertySheet
+	ProjectType="Visual C++"
+	Version="8.00"
+	Name="unrealgold"
+	>
+	<Tool
+		Name="VCCLCompilerTool"
+		PreprocessorDefinitions="UNREALGOLD"
+	/>
+	<UserMacro
+		Name="GAMENAME"
+		Value="Unreal_226_Gold"
+	/>
+	<UserMacro
+		Name="GAMEEXE"
+		Value="unreal.exe"
+	/>
+	<UserMacro
+		Name="GAMEDIR"
+		Value="d:\unreal\"
+	/>
+</VisualStudioPropertySheet>
