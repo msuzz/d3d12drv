@@ -957,7 +957,7 @@ ID3D11Texture2D *D3D::createTexture(D3D11_TEXTURE2D_DESC &desc, D3D11_SUBRESOURC
 	hr=D3DObjects.device->CreateTexture2D(&desc,&data, &texture);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating texture resource.");
+		UD3D12RenderDevice::debugs("Error creating texture resource.");
 		return NULL;
 	}
 	return texture;
@@ -1012,7 +1012,7 @@ void D3D::cacheTexture(unsigned __int64 id,TextureMetaData &metadata,ID3D11Textu
 	hr = D3DObjects.device->CreateShaderResourceView(tex,&srDesc,&r);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating texture shader resource view.");
+		UD3D12RenderDevice::debugs("Error creating texture shader resource view.");
 		return;
 	}
 
@@ -1265,7 +1265,7 @@ void D3D::getScreenshot(D3D::Vec4_byte* buf)
 	SAFE_RELEASE(backBuffer);
 	SAFE_RELEASE(tdefault);
 	SAFE_RELEASE(tstaging);
-	UD3D11RenderDevice::debugs("Done.");
+	UD3D12RenderDevice::debugs("Done.");
 }
 
 /**
