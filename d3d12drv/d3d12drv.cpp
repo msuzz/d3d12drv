@@ -1,5 +1,7 @@
 /**
-\class UD3D11RenderDevice
+\class UD3D12RenderDevice
+
+Old documentation for UD3D11RenderDevice:
 
 This is the interface between the game and the graphics API.
 For the D3D11 renderer, an effort was made to have it not work directly with D3D types and objects; it is purely concerned with answering the game and putting
@@ -7,7 +9,7 @@ data in correct structures for further processing. This leaves this class relati
 It contains only the bare essential functions to implement the renderer interface.
 There are two exceptions: UD3D11RenderDevice::debugs() and UD3D11RenderDevice::getOption are helpers not required by the game.
 
-Called UD3D11RenderDevice as Unreal leaves out first letter when accessing the class; now it can be accessed as D3D1RenderDevice.
+Called UD3D11RenderDevice as Unreal leaves out first letter when accessing the class; now it can be accessed as D3D11RenderDevice.
 */
 
 #define WIN32_LEAN_AND_MEAN
@@ -16,15 +18,15 @@ Called UD3D11RenderDevice as Unreal leaves out first letter when accessing the c
 #include <io.h>
 #include <FCNTL.H>
 #include "resource.h"
-#include "D3D11Drv.h"
+#include "D3D12Drv.h"
 #include "texconversion.h"
 #include "customflags.h"
 #include "misc.h"
 
 
 //UObject glue
-IMPLEMENT_PACKAGE(D3D11Drv);
-IMPLEMENT_CLASS(UD3D11RenderDevice);
+IMPLEMENT_PACKAGE(D3D12Drv);
+IMPLEMENT_CLASS(UD3D12RenderDevice);
 
 static bool drawingWeapon; /** Whether the depth buffer was cleared and projection parameters set to draw the weapon model */
 static int customFOV; /**Field of view calculated from aspect ratio */
@@ -36,7 +38,7 @@ Prints text to the game's log and the standard output if in debug mode.
 \param s A the message to print.
 \note Does not take a wide character string because not everything we want to print might be available as such (i.e. ID3D10Blobs).
 */
-void UD3D11RenderDevice::debugs(char* s)
+void UD3D12RenderDevice::debugs(char* s)
 { 
 	WCHAR buf[255];
 	size_t n;
@@ -55,9 +57,9 @@ Attempts to read a property from the game's config file; on failure, a default i
 \return The value for the property.
 \note The default value is written so it can be user modified (either from the config or preferences window) from then on.
 */
-int UD3D11RenderDevice::getOption(TCHAR* name,int defaultVal, bool isBool)
+int UD3D12RenderDevice::getOption(TCHAR* name,int defaultVal, bool isBool)
 {
-	TCHAR* Section = L"D3D11Drv.D3D10RenderDevice";
+	TCHAR* Section = L"D3D12Drv.D3D12RenderDevice";
 	int out;
 	if(isBool)
 	{
@@ -83,7 +85,7 @@ Constructor called by the game when the renderer is first created.
 \note Required to compile for Unreal Tournament. 
 \note Binding settings to the preferences window needs to done here instead of in init() or the game crashes when starting a map if the renderer's been restarted at least once.
 */
-void UD3D11RenderDevice::StaticConstructor()
+void UD3D12RenderDevice::StaticConstructor()
 {
 	//Make the property appear in the preferences window; this will automatically pick up the current value and write back changes.
 	new(GetClass(), L"Precache", RF_Public) UBoolProperty(CPP_PROPERTY(options.precache), TEXT("Options"), CPF_Config);
@@ -129,9 +131,9 @@ Initialization of renderer.
 
 \note D3D10 renderer ignores color depth.
 */
-UBOOL UD3D11RenderDevice::Init(UViewport *InViewport,INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
+UBOOL UD3D12RenderDevice::Init(UViewport *InViewport,INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
 {
-	UD3D11RenderDevice::debugs("Initializing Direct3D 11 renderer.");
+	UD3D12RenderDevice::debugs("Initializing Direct3D 11 renderer.");
 	
 	//Set parent class params
 	URenderDevice::SpanBased = 0;
@@ -150,11 +152,11 @@ UBOOL UD3D11RenderDevice::Init(UViewport *InViewport,INT NewX, INT NewY, INT New
 	URenderDevice::HighDetailActors = 1;
 	URenderDevice::VolumetricLighting = 1;
 	//Make options reflect this
-	GConfig->SetBool(L"D3D11Drv.D3D10RenderDevice",L"Coronas",1);
-	GConfig->SetBool(L"D3D11Drv.D3D10RenderDevice",L"DetailTextures",1);
-	GConfig->SetBool(L"D3D11Drv.D3D10RenderDevice",L"ShinySurfaces",1);
-	GConfig->SetBool(L"D3D11Drv.D3D10RenderDevice",L"HighDetailActors",1);
-	GConfig->SetBool(L"D3D11Drv.D3D10RenderDevice",L"VolumetricLighting",1);
+	GConfig->SetBool(L"D3D12Drv.D3D12RenderDevice",L"Coronas",1);
+	GConfig->SetBool(L"D3D12Drv.D3D12RenderDevice",L"DetailTextures",1);
+	GConfig->SetBool(L"D3D12Drv.D3D12RenderDevice",L"ShinySurfaces",1);
+	GConfig->SetBool(L"D3D12Drv.D3D12RenderDevice",L"HighDetailActors",1);
+	GConfig->SetBool(L"D3D12Drv.D3D12RenderDevice",L"VolumetricLighting",1);
 	
 
 	//Get/set config options.
@@ -187,7 +189,7 @@ UBOOL UD3D11RenderDevice::Init(UViewport *InViewport,INT NewX, INT NewY, INT New
 
 	
 
-	if(!UD3D11RenderDevice::SetRes(NewX,NewY,NewColorBytes,Fullscreen))
+	if(!UD3D12RenderDevice::SetRes(NewX,NewY,NewColorBytes,Fullscreen))
 	{
 		GError->Log(L"Init: SetRes failed.");
 		return 0;
@@ -208,7 +210,7 @@ Resize buffers and viewport.
 \note Fullscreen can have values other than 0 and 1 for some reason.
 \note This function MUST call URenderDevice::Viewport->ResizeViewport() or the game will stall.
 */
-UBOOL UD3D11RenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
+UBOOL UD3D12RenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
 {
 
 	//Without BLIT_Direct3D major flickering occurs when switching from fullscreen to windowed.
@@ -240,9 +242,9 @@ UBOOL UD3D11RenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL Fu
 /**
 Cleanup.
 */
-void UD3D11RenderDevice::Exit()
+void UD3D12RenderDevice::Exit()
 {
-	UD3D11RenderDevice::debugs("Direct3D 11 renderer exiting.");
+	UD3D12RenderDevice::debugs("Direct3D 12 renderer exiting.");
 	D3D::uninit();
 	//FreeConsole();
 }
@@ -252,9 +254,9 @@ Empty texture cache.
 \param AllowPrecache Enabled if the game allows us to precache; respond by setting URenderDevice::PrecacheOnFlip = 1 if wanted. This does make load times longer.
 */
 #if UNREALGOLD
-void UD3D11RenderDevice::Flush()
+void UD3D12RenderDevice::Flush()
 #else
-void UD3D11RenderDevice::Flush(UBOOL AllowPrecache)
+void UD3D12RenderDevice::Flush(UBOOL AllowPrecache)
 #endif
 {
 	D3D::flush();
@@ -280,7 +282,7 @@ Depending on the values of the related parameters (see source code) this should 
 EndFlash() ends this, but other renderers actually save the parameters and start drawing it there (probably so it is drawn with the correct depth).
 \note RenderLockFlags aren't always properly set, this results in for example glitching in the Unreal castle flyover, in the wall of the tower with the Nali on it.
 */
-void UD3D11RenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* InHitData, INT* InHitSize )
+void UD3D12RenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* InHitData, INT* InHitSize )
 {
 
 	//If needed, set new field of view; the game resets this on level switches etc. Can't be done in config as Unreal doesn't support this.
@@ -326,7 +328,7 @@ void UD3D11RenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 Finish rendering.
 /param Blit Whether the front and back buffers should be swapped.
 */
-void UD3D11RenderDevice::Unlock(UBOOL Blit)
+void UD3D12RenderDevice::Unlock(UBOOL Blit)
 {
 	D3D::render();
 
@@ -354,7 +356,7 @@ Complex surfaces are used for map geometry. They consists of facets which in tur
 \note D3D10 renderer handles DetailTexture range in shader.
 \note Check if submitted polygons are valid (3 or more points).
 */
-void UD3D11RenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet )
+void UD3D12RenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet )
 {	
 	D3D::setProjectionMode(D3D::PROJ_NORMAL);
 
@@ -480,7 +482,7 @@ They are sent with a call of this function per triangle fan, worldview transform
 \note Modulated models (i.e. shadows) shouldn't have a color, and fog should only be applied to models with the correct flags for that. The D3D10 renderer handles this in the shader.
 \note Check if submitted polygons are valid (3 or more points).
 */
-void UD3D11RenderDevice::DrawGouraudPolygon( FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, int NumPts, DWORD PolyFlags, FSpanBuffer* Span )
+void UD3D12RenderDevice::DrawGouraudPolygon( FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, int NumPts, DWORD PolyFlags, FSpanBuffer* Span )
 {
 	
 	if(NumPts<3) //Invalid triangle
@@ -560,7 +562,7 @@ Used for 2D UI elements, coronas, etc.
 The Z coordinate however is transformed and divided by W; then W is set to 1 in the shader to get correct depth and yet preserve X and Y.
 Other renderers take the opposite approach and multiply X by RProjZ*Z and Y by RProjZ*Z*aspect so they are preserved and then transform everything.
 */
-void UD3D11RenderDevice::DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags )
+void UD3D12RenderDevice::DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags )
 {
 	D3D::setProjectionMode(D3D::PROJ_Z_ONLY);
 	SetSceneNode(Frame); //Set scene node fix.
@@ -638,14 +640,14 @@ void UD3D11RenderDevice::DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT 
 /**
 For UnrealED.
 */
-void UD3D11RenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector P1, FVector P2 )
+void UD3D12RenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector P1, FVector P2 )
 {
 }
 
 /**
 For UnrealED.
 */
-void UD3D11RenderDevice::Draw2DPoint( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FLOAT X1, FLOAT Y1, FLOAT X2, FLOAT Y2, FLOAT Z )
+void UD3D12RenderDevice::Draw2DPoint( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FLOAT X1, FLOAT Y1, FLOAT X2, FLOAT Y2, FLOAT Z )
 {
 }
 
@@ -653,7 +655,7 @@ void UD3D11RenderDevice::Draw2DPoint( FSceneNode* Frame, FPlane Color, DWORD Lin
 Clear the depth buffer. Used to draw the skybox behind the rest of the geometry, and weapon in front.
 \note It is important that any vertex buffer contents be commited before actually clearing the depth!
 */
-void UD3D11RenderDevice::ClearZ( FSceneNode* Frame )
+void UD3D12RenderDevice::ClearZ( FSceneNode* Frame )
 {
 	D3D::clearDepth();
 }
@@ -661,21 +663,21 @@ void UD3D11RenderDevice::ClearZ( FSceneNode* Frame )
 /**
 Something to do with clipping planes, not needed. 
 */
-void UD3D11RenderDevice::PushHit( const BYTE* Data, INT Count )
+void UD3D12RenderDevice::PushHit( const BYTE* Data, INT Count )
 {
 }
 
 /**
 Something to do with clipping planes, not needed. 
 */
-void UD3D11RenderDevice::PopHit( INT Count, UBOOL bForce )
+void UD3D12RenderDevice::PopHit( INT Count, UBOOL bForce )
 {
 }
 
 /**
 Something to do with FPS counters etc, not needed. 
 */
-void UD3D11RenderDevice::GetStats( TCHAR* Result )
+void UD3D12RenderDevice::GetStats( TCHAR* Result )
 {
 
 }
@@ -684,11 +686,11 @@ void UD3D11RenderDevice::GetStats( TCHAR* Result )
 Used for screenshots and savegame previews.
 \param Pixels An array of 32 bit pixels in which to dump the back buffer.
 */
-void UD3D11RenderDevice::ReadPixels( FColor* Pixels )
+void UD3D12RenderDevice::ReadPixels( FColor* Pixels )
 {
-	UD3D11RenderDevice::debugs("Dumping screenshot...");
+	UD3D12RenderDevice::debugs("Dumping screenshot...");
 	D3D::getScreenshot((D3D::Vec4_byte*)Pixels);
-	UD3D11RenderDevice::debugs("Done");
+	UD3D12RenderDevice::debugs("Done");
 }
 
 /**
@@ -701,7 +703,7 @@ Various command from the game. Can be used to intercept input. First let the par
 
 \note Deus Ex ignores resolutions it does not like.
 */
-UBOOL UD3D11RenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
+UBOOL UD3D12RenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
 {
 	//First try parent
 	wchar_t* ptr;
@@ -714,16 +716,16 @@ UBOOL UD3D11RenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
 	#endif
 	if(ParseCommand(&Cmd,L"GetRes"))
 	{
-		UD3D11RenderDevice::debugs("Getting modelist...");
+		UD3D12RenderDevice::debugs("Getting modelist...");
 		TCHAR* resolutions=D3D::getModes();
 		Ar.Log(resolutions);
 		delete [] resolutions;
-		UD3D11RenderDevice::debugs("Done.");
+		UD3D12RenderDevice::debugs("Done.");
 		return 1;
 	}	
 	else if((ptr=(wchar_t*)wcswcs(Cmd,L"Brightness"))) //Brightness is sent as "brightness [val]".
 	{
-		UD3D11RenderDevice::debugs("Setting brightness.");
+		UD3D12RenderDevice::debugs("Setting brightness.");
 		if((ptr=wcschr(ptr,' ')))//Search for space after 'brightness'
 		{
 			float b;
@@ -743,7 +745,7 @@ This optional function can be used to set the frustum and viewport parameters pe
 Unreal/UT weapons all seem to fall within ZWeapons: Z<12. Can be used to detect, clear depth (to prevent intersecting world) and move them. Only disadvantage of using increased zNear is that water surfaces the player is bobbing in don't look as good.
 The D3D10 renderer moves gouraud polygons and tiles with Z < zNear (or Z < ZWeapons if needed) inside the range, allowing Unreal/UT weapons (after a depth clear) and tiles to be displayed correctly. ComplexSurfaces are not moved as this results in odd looking water surfaces.
 */
-void UD3D11RenderDevice::SetSceneNode(FSceneNode* Frame )
+void UD3D12RenderDevice::SetSceneNode(FSceneNode* Frame )
 {
 	//Calculate projection parameters
 	float aspect = Frame->FY/Frame->FX;
@@ -762,7 +764,7 @@ Store a texture in the renderer-kept texture cache. Only called by the game if U
 \note Extra care is taken to recache textures that aren't saved as masked, but now have flags indicating they should be (masking is not always properly set).
 	as this couldn't be anticipated in advance, the texture needs to be deleted and recreated.
 */
-void UD3D11RenderDevice::PrecacheTexture( FTextureInfo& Info, DWORD PolyFlags )
+void UD3D12RenderDevice::PrecacheTexture( FTextureInfo& Info, DWORD PolyFlags )
 {
 	if(D3D::textureIsCached(Info.CacheID))
 	{
@@ -789,7 +791,7 @@ void UD3D11RenderDevice::PrecacheTexture( FTextureInfo& Info, DWORD PolyFlags )
 /**
 Other renderers handle flashes here by saving the related structures; this one does it in Lock().
 */
-void  UD3D11RenderDevice::EndFlash()
+void  UD3D12RenderDevice::EndFlash()
 {
 
 }
@@ -804,7 +806,7 @@ fog, as such it's difficult to move this into a shader.
 \param ForSurf Fog plane information. Should be drawn with alpha blending enabled, color alpha = position.z/FogDistance.
 \note The pre- and post function for this are meant to set blend state but aren't really needed.
 */
-void UD3D11RenderDevice::DrawFogSurface(FSceneNode* Frame, FFogSurf &FogSurf)
+void UD3D12RenderDevice::DrawFogSurface(FSceneNode* Frame, FFogSurf &FogSurf)
 {
 	float mult = 1.0/FogSurf.FogDistance;
 	D3D::setProjectionMode(D3D::PROJ_NORMAL);
@@ -838,7 +840,7 @@ This function tells us how to configure the fog.
 \param FogDistance The end distance of the fog (start distance is always 0)
 \param FogColor The fog's color.
 */
-void UD3D11RenderDevice::PreDrawGouraud(FSceneNode *Frame, FLOAT FogDistance, FPlane FogColor)
+void UD3D12RenderDevice::PreDrawGouraud(FSceneNode *Frame, FLOAT FogDistance, FPlane FogColor)
 {
 	if(FogDistance>0)
 	{
@@ -851,7 +853,7 @@ void UD3D11RenderDevice::PreDrawGouraud(FSceneNode *Frame, FLOAT FogDistance, FP
 Turn off fogging off.
 \param FogDistance Distance with which fog was previously turned on.
 */
-void UD3D11RenderDevice::PostDrawGouraud(FLOAT FogDistance)
+void UD3D12RenderDevice::PostDrawGouraud(FLOAT FogDistance)
 {
 	if(FogDistance>0)
 	{

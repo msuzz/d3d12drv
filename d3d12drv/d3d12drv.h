@@ -1,19 +1,19 @@
 /**
-\file D3D11Drv.h
+\file D3D12Drv.h
 */
 
 #pragma once
 #include "Engine.h"
 #include "UnRender.h"
 #include "d3d.h"
-class UD3D11RenderDevice:public URenderDevice
+class UD3D12RenderDevice:public URenderDevice
 {
 
 //UObject glue
 #if (UNREALTOURNAMENT || RUNE)
-DECLARE_CLASS(UD3D11RenderDevice,URenderDevice,CLASS_Config,D3D11Drv)
+DECLARE_CLASS(UD3D12RenderDevice,URenderDevice,CLASS_Config,D3D12Drv)
 #else
-DECLARE_CLASS(UD3D11RenderDevice,URenderDevice,CLASS_Config)
+DECLARE_CLASS(UD3D12RenderDevice,URenderDevice,CLASS_Config)
 #endif
 
 private:
