@@ -1272,29 +1272,40 @@ void D3D::getScreenshot(D3D::Vec4_byte* buf)
 Find the maximum level of MSAA supported by the device and clamp the options.MSAA setting to this.
 \return 1 if succesful.
 */
+
+/*
+msuzz Notes: To check if an AA setting is supported in Direct3D 11, we call ID3D11Device::CheckMultisampleQualityLevels
+with a sample count (count), and the output pointer (&levels) receives a positive value if it is supported. This method
+no longer exists in Direct3D 12. Instead, we create a D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS enum and send it to
+ID3D12Device::CheckFeatureSupport. This method will modify the enum with the result.
+*/
 int D3D::findAALevel()
 {
 	//Create device to check MSAA support with
 	HRESULT hr;
+	D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS ms;
 
 	//Check MSAA support by going down the counts until a suitable one is found	
-	UINT levels=0;
-	int count;
-	for(count = options.samples ;levels==0&&count>0;count--)
+	ms.Format = BACKBUFFER_FORMAT;
+	ms.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
+	ms.NumQualityLevels = 0;
+	
+	for(ms.SampleCount=options.samples; ms.NumQualityLevels==0 && ms.SampleCount>0; ms.SampleCount--)
 	{
-		hr = D3DObjects.device->CheckMultisampleQualityLevels(BACKBUFFER_FORMAT,count,&levels);
+		//CheckMultisampleQualityLevels -> CheckFeatureSupport
+		hr = D3DObjects.device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,&ms,sizeof(ms));
 		if(FAILED(hr))
 		{
-			UD3D11RenderDevice::debugs("Error getting MSAA support level.");
+			UD3D12RenderDevice::debugs("Error getting MSAA support level.");
 			return 0;
 		}
-		if(levels!=0) //sample amount is supported
+		if(ms.NumQualityLevels!=0) //sample amount is supported
 			break;
 	}
-	if(count!=options.samples)
+	if(ms.SampleCount!=options.samples)
 	{
-		UD3D11RenderDevice::debugs("Anti aliasing setting decreased; requested setting unsupported.");
-		options.samples = count;
+		UD3D12RenderDevice::debugs("Anti aliasing setting decreased; requested setting unsupported.");
+		options.samples = ms.SampleCount;
 	}
 	return 1;
 }
