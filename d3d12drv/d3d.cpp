@@ -438,7 +438,7 @@ Cleanup
 */
 void D3D::uninit()
 {
-	UD3D11RenderDevice::debugs("Uninit.");
+	UD3D12RenderDevice::debugs("Uninit.");
 	D3D::flush();
 	D3DObjects.swapChain->SetFullscreenState(FALSE,NULL); //Go windowed so swapchain can be released
 
@@ -463,7 +463,7 @@ void D3D::uninit()
 	SAFE_RELEASE(D3DObjects.deviceContext);
 	SAFE_RELEASE(D3DObjects.output);
 	SAFE_RELEASE(D3DObjects.factory);
-	UD3D11RenderDevice::debugs("Bye.");
+	UD3D12RenderDevice::debugs("Bye.");
 }
 
 
@@ -487,7 +487,7 @@ int D3D::resize(int X, int Y, bool fullScreen)
 	hr = D3DObjects.swapChain->GetDesc(&sd);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Failed to get swap chain description.");
+		UD3D12RenderDevice::debugs("Failed to get swap chain description.");
 		return 0;
 	}
 	sd.BufferDesc.Width = X; //Set these so we can use this for getclosestmatchingmode
@@ -501,26 +501,26 @@ int D3D::resize(int X, int Y, bool fullScreen)
 	{
 		if(FAILED(hr))
 		{
-			UD3D11RenderDevice::debugs("Failed to get output adapter.");
+			UD3D12RenderDevice::debugs("Failed to get output adapter.");
 			return 0;
 		}
 		DXGI_MODE_DESC fullscreenMode = sd.BufferDesc;
 		//hr = D3DObjects.output->FindClosestMatchingMode(&sd.BufferDesc,&fullscreenMode,D3DObjects.device);
 		if(FAILED(hr))
 		{
-			UD3D11RenderDevice::debugs("Failed to get matching display mode.");
+			UD3D12RenderDevice::debugs("Failed to get matching display mode.");
 			return 0;
 		}
 		hr = D3DObjects.swapChain->ResizeTarget(&fullscreenMode);
 		if(FAILED(hr))
 		{
-			UD3D11RenderDevice::debugs("Failed to set full-screen resolution.");
+			UD3D12RenderDevice::debugs("Failed to set full-screen resolution.");
 			return 0;
 		}
 		hr = D3DObjects.swapChain->SetFullscreenState(TRUE,NULL);
 		if(FAILED(hr))
 		{
-			UD3D11RenderDevice::debugs("Failed to switch to full-screen.");
+			UD3D12RenderDevice::debugs("Failed to switch to full-screen.");
 			//return 0;
 		}
 		//MS recommends doing this
@@ -529,7 +529,7 @@ int D3D::resize(int X, int Y, bool fullScreen)
 		hr = D3DObjects.swapChain->ResizeTarget(&fullscreenMode);
 		if(FAILED(hr))
 		{
-			UD3D11RenderDevice::debugs("Failed to set full-screen resolution.");
+			UD3D12RenderDevice::debugs("Failed to set full-screen resolution.");
 			return 0;
 		}
 		sd.BufferDesc = fullscreenMode;
@@ -539,7 +539,7 @@ int D3D::resize(int X, int Y, bool fullScreen)
 	hr = D3DObjects.swapChain->ResizeBuffers(sd.BufferCount,X,Y,sd.BufferDesc.Format,sd.Flags); //Resize backbuffer
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Failed to resize back buffer.");
+		UD3D12RenderDevice::debugs("Failed to resize back buffer.");
 		return 0;
 	}
 	if(!createRenderTargetViews()) //Recreate render target view
@@ -598,7 +598,7 @@ void D3D::map(bool clear)
 	HRESULT hr, hr2;
 	if(mappedIBuffer.pData!=NULL||mappedVBuffer.pData!=NULL)
 	{
-		//UD3D11RenderDevice::debugs("map() without render");
+		//UD3D12RenderDevice::debugs("map() without render");
 		return;
 	}
 
@@ -619,7 +619,7 @@ void D3D::map(bool clear)
 	hr2=D3DObjects.deviceContext->Map(D3DObjects.indexBuffer,0,m,0,&mappedIBuffer);
 	if(FAILED(hr) || FAILED(hr2))
 	{
-		UD3D11RenderDevice::debugs("Failed to map index and/or vertex buffer.");
+		UD3D12RenderDevice::debugs("Failed to map index and/or vertex buffer.");
 	}
 }
 
@@ -648,7 +648,7 @@ void D3D::render()
 	//This shouldn't happen ever, but if it does we crash (negative amount of indices for draw()), so let's check anyway
 	if(numIndices<numUndrawnIndices)
 	{
-		UD3D11RenderDevice::debugs("Buffer error.");
+		UD3D12RenderDevice::debugs("Buffer error.");
 		numUndrawnIndices=0;
 		return;
 	}
@@ -717,7 +717,7 @@ void D3D::present()
 	hr = D3DObjects.swapChain->Present((options.VSync!=0),0);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Present error.");
+		UD3D12RenderDevice::debugs("Present error.");
 		return;
 	}
 }
@@ -785,7 +785,7 @@ void D3D::setViewPort(int X, int Y, int left, int top)
 		
 		commit();
 
-		D3D11_VIEWPORT vp;
+		D3D12_VIEWPORT vp;
 		vp.Width = X;
 		vp.Height = Y;
 		vp.MinDepth = 0.0;
