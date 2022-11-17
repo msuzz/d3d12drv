@@ -6,8 +6,8 @@
 #define SAFE_RELEASE(p)      { if(p) { (p)->Release(); (p)=NULL; } }
 #define CLAMP(p,min,max)	{ if(p < min) p = min; else if (p>max) p = max; }
 
-#include <D3D11.h>
-#include <D3DX11Effect.h>
+#include <D3D12.h>
+#include <D3DX11Effect.h> // TODO: Find D3D12 replacement
 
 class D3D
 {
@@ -15,7 +15,7 @@ private:
 	static int createRenderTargetViews();
 	static int findAALevel();
 	static void commit();
-	static ID3DX11EffectPass* switchToPass(int index);
+	static ID3DX11EffectPass* switchToPass(int index); // TODO: Find D3D12 replacement
 	
 public:
 	/**

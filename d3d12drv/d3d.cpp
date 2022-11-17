@@ -17,13 +17,19 @@ Different shaders/input layouts for different drawXXXX renderer calls for smalle
 #endif
 
 #include <dxgi.h>
-#include <d3d11.h>
-#include <xnamath.h>
-#include <D3DX11async.h>
+#include <d3d12.h>
+#include <DirectXMath.h> // xnamath.h -> DirectXMath.h
+#include <DirectXPackedVector.h>
+#include <D3dcompiler.h> // D3DX11async.h -> D3dcompiler.h
+#include <wrl.h>
 #include <hash_map>
-#include "d3d11drv.h"
+#include "d3d12drv.h"
 #include "polyflags.h" //for polyflags
 #include "d3d.h"
+
+using Microsoft::WRL::ComPtr;
+using namespace DirectX;
+using namespace DirectX::PackedVector;
 
 /**
 D3D Objects
@@ -32,8 +38,8 @@ static struct
 {
 	IDXGIFactory1 *factory;
 	IDXGIOutput* output;
-	ID3D11Device* device;
-	ID3D11DeviceContext* deviceContext;
+	ID3D12Device* device;
+	ID3D12DeviceContext* deviceContext;
 	IDXGISwapChain* swapChain;
 	ID3D11RenderTargetView* renderTargetView;
 	ID3D11InputLayout* vertexLayout;
@@ -107,7 +113,8 @@ static D3D11_MAPPED_SUBRESOURCE mappedIBuffer; //Memmapped version of index buff
 Misc
 */
 static const DXGI_FORMAT BACKBUFFER_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
-static const D3D_FEATURE_LEVEL featureLevels[] = {D3D_FEATURE_LEVEL_10_0}; /**< What feature levels are supportes */
+//static const D3D_FEATURE_LEVEL featureLevels[] = {D3D_FEATURE_LEVEL_10_0}; /**< What feature levels are supported */
+static const D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_12_0; // Direct3D 12 uses a single min feature level
 static const float TIME_STEP = (1/60.0f); //Shader time variable increase speed
 static D3D::Options options;
 
@@ -123,21 +130,33 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	HRESULT hr;
 
 	options = createOptions; //Set config options
-	CLAMP(options.samples,1,D3D11_MAX_MULTISAMPLE_SAMPLE_COUNT);
+	CLAMP(options.samples,1,D3D12_MAX_MULTISAMPLE_SAMPLE_COUNT);
 	CLAMP(options.aniso,0,16);
 	CLAMP(options.VSync,0,1);
 	CLAMP(options.LODBias,-10,10);
-	UD3D11RenderDevice::debugs("Initializing Direct3D.");
+	UD3D12RenderDevice::debugs("Initializing Direct3D.");
 
-	UINT flags=0;
+	//Enable the debug layer for debug builds
 	#ifdef _DEBUGDX
-		flags = D3D11_CREATE_DEVICE_DEBUG; //debug runtime (prints debug messages)
+	{
+		//flags = D3D11_CREATE_DEVICE_DEBUG; //debug runtime (prints debug messages)
+		ComPtr<ID3D12Debug> debugController;
+		hr = D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
+		if (FAILED(hr))
+		{
+			UD3D12RenderDevice::debugs("Failed to enable debug layer.");
+			return 0;
+		}
+		debugController->EnableDebugLayer();
+	}
 	#endif
 
-	hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,featureLevels, sizeof(featureLevels)/sizeof(D3D_FEATURE_LEVEL), D3D11_SDK_VERSION, &D3DObjects.device, NULL, &D3DObjects.deviceContext);
+	// Create the Direct3D 12 device
+	//hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,featureLevels, sizeof(featureLevels)/sizeof(D3D_FEATURE_LEVEL), D3D11_SDK_VERSION, &D3DObjects.device, NULL, &D3DObjects.deviceContext);
+	hr = D3D12CreateDevice(NULL, minFeatureLevel, IID_PPV_ARGS(&D3DObjects.device));
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating device.");
+		UD3D12RenderDevice::debugs("Error creating device.");
 		return 0;
 	}
 
@@ -180,16 +199,16 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	hr = D3DObjects.factory->CreateSwapChain(D3DObjects.device,&sd,&D3DObjects.swapChain);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating swap chain");
+		UD3D12RenderDevice::debugs("Error creating swap chain");
 		return 0;
 	}
 	D3DObjects.factory->MakeWindowAssociation(hWnd,DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_PRINT_SCREEN |DXGI_MWA_NO_ALT_ENTER); //Stop DXGI from interfering with the game
 	D3DObjects.swapChain->GetContainingOutput(&D3DObjects.output);
 		
 	//Create the effect we'll be using
-	ID3D10Blob* blob;
-	ID3D10Blob* effectBlob;
-	DWORD dwShaderFlags = D3D10_SHADER_ENABLE_STRICTNESS;
+	ID3DBlob* blob;			// ID3D10Blob -> ID3DBlob
+	ID3DBlob* effectBlob;
+	DWORD dwShaderFlags = D3DCOMPILE_ENABLE_STRICTNESS; // D3D10_SHADER_ENABLE_STRICTNESS -> D3DCOMPILE_ENABLE_STRICTNESS
 	
 	//Set shader macro options
 	#define OPTION_TO_STRING(x) char buf##x[10];_itoa_s(options.##x,buf##x,10,10);
@@ -201,7 +220,8 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	OPTION_TO_STRING(POM);
 	OPTION_TO_STRING(alphaToCoverage);
 	
-	D3D10_SHADER_MACRO macros[] = {
+	// D3D10_SHADER_MACRO -> D3D_SHADER_MACRO
+	D3D_SHADER_MACRO macros[] = {
 	OPTIONSTRING_TO_SHADERVAR(aniso,"NUM_ANISO"),
 	OPTIONSTRING_TO_SHADERVAR(LODBias,"LODBIAS"),
 	OPTIONSTRING_TO_SHADERVAR(zNear,"Z_NEAR"),
@@ -210,19 +230,19 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	OPTIONSTRING_TO_SHADERVAR(alphaToCoverage,"ALPHA_TO_COVERAGE_ENABLED"),
 	NULL};
 	
-
-	hr = D3DX11CompileFromFile(L"D3D11drv\\unreal.fx",macros,NULL,"","fx_5_0",dwShaderFlags,NULL,NULL,&effectBlob,&blob,NULL);
+	// TODO: D3DX11CompileFromFile -> D3DCompileFromFile?
+	hr = D3DCompileFromFile(L"D3D12drv\\unreal.fx",macros,NULL,"","fx_5_0",dwShaderFlags,NULL,NULL,&effectBlob,&blob,NULL);
 	if(blob) //Show compile warnings/errors if present
-			UD3D11RenderDevice::debugs((char*) blob->GetBufferPointer());		
+			UD3D12RenderDevice::debugs((char*) blob->GetBufferPointer());		
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error compiling shader file. Please make sure unreal.fx resides in the \"\\system\\D3D11drv\" directory.");		
+		UD3D12RenderDevice::debugs("Error compiling shader file. Please make sure unreal.fx resides in the \"\\system\\D3D11drv\" directory.");		
 		return 0;
 	}
 	hr = D3DX11CreateEffectFromMemory(effectBlob->GetBufferPointer(),effectBlob->GetBufferSize(),NULL,D3DObjects.device->GetFeatureLevel(),D3DObjects.device,&D3DObjects.effect);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating effect from shader.");		
+		UD3D12RenderDevice::debugs("Error creating effect from shader.");		
 		return 0;
 	}
 
@@ -277,20 +297,20 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	ID3DX11EffectTechnique* t = D3DObjects.effect->GetTechniqueByIndex(0);
 	if(!t->IsValid())
 	{
-		UD3D11RenderDevice::debugs("Failed to find technique 0.");
+		UD3D12RenderDevice::debugs("Failed to find technique 0.");
 		return 0;
 	}
 	ID3DX11EffectPass* p = t->GetPassByIndex(0);
 	if(!p->IsValid())
 	{
-		UD3D11RenderDevice::debugs("Failed to find pass 0.");
+		UD3D12RenderDevice::debugs("Failed to find pass 0.");
 		return 0;
 	}
 	p->GetDesc(&passDesc);
 	hr = D3DObjects.device->CreateInputLayout(layoutDesc, numElements, passDesc.pIAInputSignature, passDesc.IAInputSignatureSize, &D3DObjects.vertexLayout);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating input layout.");
+		UD3D12RenderDevice::debugs("Error creating input layout.");
 		return 0;
 	}
 	
@@ -305,7 +325,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	hr=D3DObjects.device->CreateBuffer( &bufferDesc,NULL, &D3DObjects.vertexBuffer );
     if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating vertex buffer.");
+		UD3D12RenderDevice::debugs("Error creating vertex buffer.");
 		return 0;
 	}
 
@@ -318,7 +338,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	hr = D3DObjects.device->CreateBuffer( &bufferDesc,NULL, &D3DObjects.indexBuffer);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating index buffer.");
+		UD3D12RenderDevice::debugs("Error creating index buffer.");
 		return 0;
 	}
 
@@ -359,7 +379,7 @@ int D3D::createRenderTargetViews()
 	hr = D3DObjects.swapChain->GetBuffer( 0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBuffer );
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error getting swap chain buffer.");
+		UD3D12RenderDevice::debugs("Error getting swap chain buffer.");
 		return 0;
 	}
 	
@@ -367,7 +387,7 @@ int D3D::createRenderTargetViews()
 	SAFE_RELEASE(pBuffer);
 	if(FAILED(hr))
 	{
-		UD3D11RenderDevice::debugs("Error creating render target view (back).");
+		UD3D12RenderDevice::debugs("Error creating render target view (back).");
 		return 0;
 	}
 
@@ -393,7 +413,7 @@ int D3D::createRenderTargetViews()
 	descDepth.MiscFlags = 0;
 	if(FAILED(D3DObjects.device->CreateTexture2D( &descDepth, NULL,&depthTexInternal )))
 	{
-		UD3D11RenderDevice::debugs("Depth texture creation failed.");
+		UD3D12RenderDevice::debugs("Depth texture creation failed.");
 		return 0;
 	}
 
@@ -404,7 +424,7 @@ int D3D::createRenderTargetViews()
 	descDSV.Flags = 0;
 	if(FAILED(D3DObjects.device->CreateDepthStencilView(depthTexInternal,&descDSV,&D3DObjects.depthStencilView )))
 	{
-		UD3D11RenderDevice::debugs("Error creating render target view (depth).");
+		UD3D12RenderDevice::debugs("Error creating render target view (depth).");
 		return 0;
 	}
 	SAFE_RELEASE(depthTexInternal);
