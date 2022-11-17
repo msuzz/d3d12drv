@@ -4,7 +4,7 @@
 
 #pragma once
 #include "d3d.h"
-#include "D3D11Drv.h"
+#include "D3D12Drv.h"
 
 class TexConversion
 {
