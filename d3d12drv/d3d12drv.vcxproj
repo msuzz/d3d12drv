@@ -45,7 +45,7 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <ProjectGuid>{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}</ProjectGuid>
-    <RootNamespace>d3d11drv</RootNamespace>
+    <RootNamespace>d3d12drv</RootNamespace>
     <Keyword>Win32Proj</Keyword>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -110,49 +110,49 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Rune 1.00 Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\debug.props" />
     <Import Project="..\rune_100.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Rune 1.00 Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\release.props" />
     <Import Project="..\rune_100.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Rune Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\debug.props" />
     <Import Project="..\rune.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Rune Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\release.props" />
     <Import Project="..\rune.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\unrealtournament.props" />
     <Import Project="..\release.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\unrealtournament.props" />
     <Import Project="..\debug.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Gold Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\unrealgold.props" />
     <Import Project="..\release.props" />
   </ImportGroup>
@@ -160,21 +160,21 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
     <Import Project="..\unrealgold.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\debug.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Deus Ex Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
     <Import Project="..\deus ex.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\release.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Deus Ex Debug|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\Render DLL.props" />
     <Import Project="..\deus ex.props" />
-    <Import Project="..\d3d11.props" />
+    <Import Project="..\d3d12.props" />
     <Import Project="..\debug.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
@@ -343,7 +343,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="d3d.cpp" />
-    <ClCompile Include="d3d11drv.cpp" />
+    <ClCompile Include="d3d12drv.cpp" />
     <ClCompile Include="misc.cpp" />
     <ClCompile Include="texconversion.cpp" />
   </ItemGroup>
@@ -921,7 +921,7 @@
     <ClInclude Include="..\Games\Unreal_226_Gold\Engine\Inc\UnURL.h" />
     <ClInclude Include="customflags.h" />
     <ClInclude Include="d3d.h" />
-    <ClInclude Include="d3d11drv.h" />
+    <ClInclude Include="d3d12drv.h" />
     <ClInclude Include="doxymain.h" />
     <ClInclude Include="misc.h" />
     <ClInclude Include="polyflags.h" />
@@ -936,7 +936,7 @@
     <FxCompile Include="unreal_pom.fx" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="d3d11Drv.int" />
+    <None Include="d3d12Drv.int" />
     <None Include="unreal.fxh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

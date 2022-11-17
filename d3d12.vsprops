@@ -2,7 +2,7 @@
 <VisualStudioPropertySheet
 	ProjectType="Visual C++"
 	Version="8.00"
-	Name="d3d11"
+	Name="d3d12"
 	>
 	<Tool
 		Name="VCLinkerTool"

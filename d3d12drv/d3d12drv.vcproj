@@ -2,9 +2,9 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="9,00"
-	Name="d3d11drv"
+	Name="d3d12drv"
 	ProjectGUID="{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}"
-	RootNamespace="d3d11drv"
+	RootNamespace="d3d12drv"
 	Keyword="Win32Proj"
 	TargetFrameworkVersion="196613"
 	>
@@ -19,7 +19,7 @@
 		<Configuration
 			Name="Deus Ex Debug|Win32"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\Render DLL.vsprops;..\deus ex.vsprops;..\d3d11.vsprops;..\debug.vsprops"
+			InheritedPropertySheets="..\Render DLL.vsprops;..\deus ex.vsprops;..\d3d12.vsprops;..\debug.vsprops"
 			CharacterSet="1"
 			>
 			<Tool
@@ -85,7 +85,7 @@
 		<Configuration
 			Name="Deus Ex Release|Win32"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\Render DLL.vsprops;..\deus ex.vsprops;..\d3d11.vsprops;..\release.vsprops"
+			InheritedPropertySheets="..\Render DLL.vsprops;..\deus ex.vsprops;..\d3d12.vsprops;..\release.vsprops"
 			CharacterSet="1"
 			WholeProgramOptimization="1"
 			>

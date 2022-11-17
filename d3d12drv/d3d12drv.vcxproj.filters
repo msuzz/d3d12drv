@@ -45,7 +45,7 @@
     <ClCompile Include="d3d.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="d3d11drv.cpp">
+    <ClCompile Include="d3d12drv.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="misc.cpp">
@@ -62,7 +62,7 @@
     <ClInclude Include="d3d.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="d3d11drv.h">
+    <ClInclude Include="d3d12drv.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="misc.h">
@@ -1811,8 +1811,6 @@
     <None Include="unreal.fxh">
       <Filter>FX</Filter>
     </None>
-    <None Include="d3d11Drv.int">
-      <Filter>Misc</Filter>
-    </None>
+    <None Include="d3d12Drv.int" />
   </ItemGroup>
 </Project>
