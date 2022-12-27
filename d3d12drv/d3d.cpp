@@ -16,16 +16,22 @@ Different shaders/input layouts for different drawXXXX renderer calls for smalle
 #define _DEBUGDX //debug device
 #endif
 
-#include <dxgi.h>
+#include <dxgi1_4.h> // required for IDXGIFactory4
 #include <d3d12.h>
 #include <DirectXMath.h> // xnamath.h -> DirectXMath.h
 #include <DirectXPackedVector.h>
 #include <D3dcompiler.h> // D3DX11async.h -> D3dcompiler.h
 #include <wrl.h>
 #include <hash_map>
+#include "include/directx/d3dx12.h"
 #include "d3d12drv.h"
 #include "polyflags.h" //for polyflags
 #include "d3d.h"
+
+// Link necessary d3d12 libraries
+#pragma comment(lib,"d3dcompiler.lib")
+#pragma comment(lib, "D3D12.lib")
+#pragma comment(lib, "dxgi.lib")
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -36,17 +42,25 @@ D3D Objects
 */
 static struct
 {
-	IDXGIFactory1 *factory;
-	IDXGIOutput* output;
-	ID3D12Device* device;
-	ID3D12DeviceContext* deviceContext;
-	IDXGISwapChain* swapChain;
-	ID3D11RenderTargetView* renderTargetView;
+	ComPtr<IDXGIFactory4> factory;
+	ComPtr<IDXGIOutput> output;
+	ComPtr<ID3D12Device3> device;
+	ComPtr<ID3D12Fence> fence;
+	ComPtr<IDXGISwapChain> swapChain;
+	ComPtr<ID3D12CommandQueue> cmdQueue;
+	ComPtr<ID3D12CommandAllocator> cmdAlloc;
+	ComPtr<ID3D12GraphicsCommandList> cmdList;
+	ComPtr<ID3D12RootSignature> rootSig;
+	ComPtr<ID3D12PipelineState> pipelineState;
+	ID3D12Resource* renderTargetView; //ID3D11RenderTargetView -> ID3D12Resource (needs flag D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET)
 	ID3D11InputLayout* vertexLayout;
-	ID3D11Buffer* vertexBuffer;	
-	ID3D11Buffer* indexBuffer;
+	ComPtr<ID3D12Resource> vertexBuf = nullptr;
+	ComPtr<ID3D12Resource> vertexBufUploader = nullptr;
+	ComPtr<ID3D12Resource> indexBuf;
 	ID3DX11Effect* effect;
-	ID3D11DepthStencilView* depthStencilView;
+	ComPtr<ID3D12Resource> depthStencilView; // Depth stencil view
+	ComPtr<ID3D12DescriptorHeap> rtvHeap;   // Render target view heap
+	ComPtr<ID3D12DescriptorHeap> dsvHeap;   // Depth stencil view heap
 } D3DObjects;
 
 /**
@@ -75,12 +89,13 @@ static struct
 {
 	ID3D11DepthStencilState* dstate_Enable;
 	ID3D11DepthStencilState* dstate_Disable;
-	ID3D11BlendState* bstate_Alpha;
+	// msuzz: Deal with these
+	/*ID3D11BlendState* bstate_Alpha;
 	ID3D11BlendState* bstate_Translucent;
 	ID3D11BlendState* bstate_Modulate;
 	ID3D11BlendState* bstate_NoBlend;
 	ID3D11BlendState* bstate_Masked;
-	ID3D11BlendState* bstate_Invis;	
+	ID3D11BlendState* bstate_Invis;	*/
 } states;
 
 /**
@@ -106,17 +121,23 @@ const unsigned int V_BUFFER_SIZE = I_BUFFER_SIZE; //In worst case, one point for
 static unsigned int numVerts; //Number of buffered verts
 static unsigned int numIndices; //Number of buffered indices
 static unsigned int numUndrawnIndices; //Number of buffered indices not yet drawn
-static D3D11_MAPPED_SUBRESOURCE mappedVBuffer; //Memmapped version of vertex buffer
-static D3D11_MAPPED_SUBRESOURCE mappedIBuffer; //Memmapped version of index buffer
+//static D3D11_MAPPED_SUBRESOURCE mappedVBuffer; //Memmapped version of vertex buffer
+//static D3D11_MAPPED_SUBRESOURCE mappedIBuffer; //Memmapped version of index buffer
 
 /*
 Misc
 */
 static const DXGI_FORMAT BACKBUFFER_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
-//static const D3D_FEATURE_LEVEL featureLevels[] = {D3D_FEATURE_LEVEL_10_0}; /**< What feature levels are supported */
+static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D24_UNORM_S8_UINT;
 static const D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_12_0; // Direct3D 12 uses a single min feature level
 static const float TIME_STEP = (1/60.0f); //Shader time variable increase speed
 static D3D::Options options;
+int scdBufCount = 1;
+int currBackBuf = 0;
+UINT rtvDescriptorSize = 0;
+UINT dsvDescriptorSize = 0;
+UINT cbvSrvDescriptorSize = 0;
+UINT64 currentFence = 0;
 
 /**
 Create Direct3D device, swapchain, etc. Purely boilerplate stuff.
@@ -134,7 +155,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	CLAMP(options.aniso,0,16);
 	CLAMP(options.VSync,0,1);
 	CLAMP(options.LODBias,-10,10);
-	UD3D12RenderDevice::debugs("Initializing Direct3D.");
+	UD3D12RenderDevice::debugs("Initializing Direct3D 12.");
 
 	//Enable the debug layer for debug builds
 	#ifdef _DEBUGDX
@@ -151,64 +172,156 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	}
 	#endif
 
+	// Create the factory
+	hr = CreateDXGIFactory1(IID_PPV_ARGS(&D3DObjects.factory));
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating factory.");
+		return 0;
+	}
+
 	// Create the Direct3D 12 device
-	//hr=D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,featureLevels, sizeof(featureLevels)/sizeof(D3D_FEATURE_LEVEL), D3D11_SDK_VERSION, &D3DObjects.device, NULL, &D3DObjects.deviceContext);
-	hr = D3D12CreateDevice(NULL, minFeatureLevel, IID_PPV_ARGS(&D3DObjects.device));
-	if(FAILED(hr))
+	hr = D3D12CreateDevice(
+		NULL,
+		D3D_FEATURE_LEVEL_12_0,
+		IID_PPV_ARGS(&D3DObjects.device)
+	);
+	if (FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Error creating device.");
 		return 0;
 	}
 
-	//Get the factory that created the device
-	IDXGIDevice1 * pDXGIDevice;
-	hr = D3DObjects.device->QueryInterface(__uuidof(IDXGIDevice1), (void **)&pDXGIDevice);
-      
-	IDXGIAdapter1 * pDXGIAdapter;
-	hr = pDXGIDevice->GetParent(__uuidof(IDXGIAdapter1), (void **)&pDXGIAdapter);
+	// Create fence for GPU/CPU synchronisation
+	hr = D3DObjects.device->CreateFence(
+		0,
+		D3D12_FENCE_FLAG_NONE,
+		IID_PPV_ARGS(&D3DObjects.fence)
+	);
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating fence.");
+		return 0;
+	}
 
-	IDXGIFactory1 * pIDXGIFactory;
-	hr = pDXGIAdapter->GetParent(__uuidof(IDXGIFactory1), (void **)&pIDXGIFactory);
-	D3DObjects.factory = pIDXGIFactory;
+	// Cache descriptor sizes
+	rtvDescriptorSize = D3DObjects.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	dsvDescriptorSize = D3DObjects.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+	cbvSrvDescriptorSize = D3DObjects.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+	// Check MSAA support and clamp to max level.
+	if(!D3D::findAALevel()) 
+		return 0;
 	SAFE_RELEASE(pDXGIDevice);
 	SAFE_RELEASE(pDXGIAdapter);
 	SAFE_RELEASE(pIDXGIFactory);
 
-	if(!D3D::findAALevel()) //Clamp MSAA option to max supported level.
+	// Create command queue
+	D3D12_COMMAND_QUEUE_DESC cqd;
+	cqd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	cqd.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	hr = D3DObjects.device->CreateCommandQueue(
+		&cqd,
+		IID_PPV_ARGS(&D3DObjects.cmdQueue)
+	);
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating command queue.");
 		return 0;
+	}
 
-	//Create device and swap chain
-	DXGI_SWAP_CHAIN_DESC sd;
-	ZeroMemory( &sd, sizeof( sd ) );
-	sd.BufferCount = 1;
-	//sd.BufferDesc.Width = Window::getWidth();
-	//sd.BufferDesc.Height = Window::getHeight();
-	sd.BufferDesc.Format = BACKBUFFER_FORMAT;
-	//sd.BufferDesc.RefreshRate.Numerator = 60;
-	//sd.BufferDesc.RefreshRate.Denominator = 1;
-	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	sd.OutputWindow = hWnd;
-	sd.SampleDesc.Count = options.samples;
-	sd.SampleDesc.Quality = 0;
-	sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-	sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-	sd.Windowed = TRUE;
+	hr = D3DObjects.device->CreateCommandAllocator(
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		IID_PPV_ARGS(D3DObjects.cmdAlloc.GetAddressOf())
+	);
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating command allocator.");
+		return 0;
+	}
 
-	//Create a swap chain
-	//hr = D3D11CreateDeviceAndSwapChain(NULL,D3D_DRIVER_TYPE_HARDWARE,NULL,flags,featureLevels, sizeof(featureLevels)/sizeof(D3D_FEATURE_LEVEL), D3D11_SDK_VERSION,&sd,&D3DObjects.swapChain, &D3DObjects.device, NULL, &D3DObjects.deviceContext);	
-	hr = D3DObjects.factory->CreateSwapChain(D3DObjects.device,&sd,&D3DObjects.swapChain);
+	hr = D3DObjects.device->CreateCommandList(
+		0,
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		D3DObjects.cmdAlloc.Get(),
+		nullptr,
+		IID_PPV_ARGS(D3DObjects.cmdList.GetAddressOf())
+	);
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating command list.");
+		return 0;
+	}
+
+	D3DObjects.cmdList->Close();
+
+	// Describe and create swap chain
+	DXGI_SWAP_CHAIN_DESC scd;
+	ZeroMemory(&scd, sizeof(scd));
+	scd.BufferCount = scdBufCount;
+	scd.BufferDesc.Width = Window::getWidth();
+	scd.BufferDesc.Height = Window::getHeight();
+	scd.BufferDesc.Format = BACKBUFFER_FORMAT;
+	scd.BufferDesc.RefreshRate.Numerator = 60;
+	scd.BufferDesc.RefreshRate.Denominator = 1;
+	scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	scd.OutputWindow = hWnd;
+	scd.SampleDesc.Count = options.samples;
+	scd.SampleDesc.Quality = 0;
+	scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH; // If unspecified, will use desktop display mode in fullscreen
+	scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	scd.Windowed = TRUE;
+
+	hr = D3DObjects.factory->CreateSwapChain(
+		D3DObjects.cmdQueue.Get(),
+		&scd,
+		&D3DObjects.swapChain
+	);
 	if(FAILED(hr))
 	{
-		UD3D12RenderDevice::debugs("Error creating swap chain");
+		UD3D12RenderDevice::debugs("Error creating swap chain.");
 		return 0;
 	}
 	D3DObjects.factory->MakeWindowAssociation(hWnd,DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_PRINT_SCREEN |DXGI_MWA_NO_ALT_ENTER); //Stop DXGI from interfering with the game
 	D3DObjects.swapChain->GetContainingOutput(&D3DObjects.output);
 		
+	// Describe and create the RTV/DSV descriptor heaps
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
+	rtvHeapDesc.NumDescriptors = scdBufCount;
+	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	rtvHeapDesc.NodeMask = 0;
+
+	hr = D3DObjects.device->CreateDescriptorHeap(
+		&rtvHeapDesc,
+		IID_PPV_ARGS(D3DObjects.rtvHeap.GetAddressOf())
+	);
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating RTV descriptor heap.");
+		return 0;
+	}
+
+	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
+	dsvHeapDesc.NumDescriptors = 1;
+	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	dsvHeapDesc.NodeMask = 0;
+
+	hr = D3DObjects.device->CreateDescriptorHeap(
+		&dsvHeapDesc,
+		IID_PPV_ARGS(D3DObjects.dsvHeap.GetAddressOf())
+	);
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating DSV descriptor heap.");
+		return 0;
+	}
+		
 	//Create the effect we'll be using
-	ID3DBlob* blob;			// ID3D10Blob -> ID3DBlob
-	ID3DBlob* effectBlob;
-	DWORD dwShaderFlags = D3DCOMPILE_ENABLE_STRICTNESS; // D3D10_SHADER_ENABLE_STRICTNESS -> D3DCOMPILE_ENABLE_STRICTNESS
+	ComPtr<ID3DBlob> shadBlob = nullptr;
+	ComPtr<ID3DBlob> shadErrBlob;
+	DWORD dwShaderFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 	
 	//Set shader macro options
 	#define OPTION_TO_STRING(x) char buf##x[10];_itoa_s(options.##x,buf##x,10,10);
@@ -220,7 +333,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	OPTION_TO_STRING(POM);
 	OPTION_TO_STRING(alphaToCoverage);
 	
-	// D3D10_SHADER_MACRO -> D3D_SHADER_MACRO
+	D3D_SHADER_MACRO shaderMacros[] = {
 	D3D_SHADER_MACRO macros[] = {
 	OPTIONSTRING_TO_SHADERVAR(aniso,"NUM_ANISO"),
 	OPTIONSTRING_TO_SHADERVAR(LODBias,"LODBIAS"),
@@ -230,24 +343,48 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	OPTIONSTRING_TO_SHADERVAR(alphaToCoverage,"ALPHA_TO_COVERAGE_ENABLED"),
 	NULL};
 	
-	// TODO: D3DX11CompileFromFile -> D3DCompileFromFile?
-	hr = D3DCompileFromFile(L"D3D12drv\\unreal.fx",macros,NULL,"","fx_5_0",dwShaderFlags,NULL,NULL,&effectBlob,&blob,NULL);
-	if(blob) //Show compile warnings/errors if present
-			UD3D12RenderDevice::debugs((char*) blob->GetBufferPointer());		
+	// Compile shader
+	hr = D3DCompileFromFile(
+		L"D3D12drv\\unreal.fx",
+		shaderMacros,
+		D3D_COMPILE_STANDARD_FILE_INCLUDE,
+		"NULL",
+		"fx_5_1",
+		dwShaderFlags,
+		0,
+		&shadBlob,
+		&shadErrBlob
+	);
+
+	if(shadErrBlob != nullptr) //Show compile warnings/errors if present
+		UD3D12RenderDevice::debugs((char*) shadErrBlob->GetBufferPointer());	
+
 	if(FAILED(hr))
 	{
-		UD3D12RenderDevice::debugs("Error compiling shader file. Please make sure unreal.fx resides in the \"\\system\\D3D11drv\" directory.");		
+		UD3D12RenderDevice::debugs("Error compiling shader file. Please make sure unreal.fx resides in the \"\\system\\D3D12drv\" directory.");		
 		return 0;
 	}
-	hr = D3DX11CreateEffectFromMemory(effectBlob->GetBufferPointer(),effectBlob->GetBufferSize(),NULL,D3DObjects.device->GetFeatureLevel(),D3DObjects.device,&D3DObjects.effect);
+
+	// Create effect from shader
+	// msuzz: Replace with PSO
+	/*
+	hr = D3DX11CreateEffectFromMemory(
+		effectBlob->GetBufferPointer(),
+		effectBlob->GetBufferSize(),
+		NULL,
+		D3DObjects.device->GetFeatureLevel(),
+		D3DObjects.device,
+		&D3DObjects.effect
+	);
 	if(FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Error creating effect from shader.");		
 		return 0;
 	}
 
-	SAFE_RELEASE(blob);
+	SAFE_RELEASE(shadBlob);
 	SAFE_RELEASE(effectBlob);
+	*/
 
 	//Get shader params
 	shaderVars.projection = D3DObjects.effect->GetVariableByName("projection")->AsMatrix();
@@ -277,22 +414,28 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	setBrightness(options.brightness);
 
 	//Set the vertex layout
-    D3D11_INPUT_ELEMENT_DESC layoutDesc[] =
+    D3D12_INPUT_ELEMENT_DESC elementDesc[] =
     {
-		{ "POSITION",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,   D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "COLOR",   0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,   D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "COLOR",   1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,   D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "NORMAL",     0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD",     0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD",     1, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD",     2, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD",     3, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD",     4, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "BLENDINDICES", 0, DXGI_FORMAT_R32_UINT, 0, D3D11_APPEND_ALIGNED_ELEMENT,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "POSITION",     0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "COLOR",        0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "COLOR",        1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "NORMAL",	      0, DXGI_FORMAT_R32G32B32_FLOAT,    0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     0, DXGI_FORMAT_R32G32_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     1, DXGI_FORMAT_R32G32_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     2, DXGI_FORMAT_R32G32_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     3, DXGI_FORMAT_R32G32_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",     4, DXGI_FORMAT_R32G32_FLOAT,       0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "BLENDINDICES", 0, DXGI_FORMAT_R32_UINT,           0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+
+	D3D12_INPUT_LAYOUT_DESC ilDesc = {
+		elementDesc,
+		sizeof(elementDesc)/sizeof(elementDesc[0])
     };
     UINT numElements = sizeof(layoutDesc) / sizeof(layoutDesc[0]);
 
-    //Create the input layout.
+	// msuzz: I don't think we need these, replaced by pso
+	/*
 	D3DX11_PASS_DESC passDesc;
 	ID3DX11EffectTechnique* t = D3DObjects.effect->GetTechniqueByIndex(0);
 	if(!t->IsValid())
@@ -308,53 +451,137 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	}
 	p->GetDesc(&passDesc);
 	hr = D3DObjects.device->CreateInputLayout(layoutDesc, numElements, passDesc.pIAInputSignature, passDesc.IAInputSignatureSize, &D3DObjects.vertexLayout);
-	if(FAILED(hr))
+	if (FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Error creating input layout.");
 		return 0;
-	}
+	} */
 	
 	//Set up vertex buffer
-	D3D11_BUFFER_DESC bufferDesc;
-    bufferDesc.Usage            = D3D11_USAGE_DYNAMIC;
-    bufferDesc.ByteWidth        = sizeof(Vertex)*V_BUFFER_SIZE ;
-    bufferDesc.BindFlags        = D3D11_BIND_VERTEX_BUFFER;
-    bufferDesc.CPUAccessFlags   = D3D11_CPU_ACCESS_WRITE;
-    bufferDesc.MiscFlags        = 0;
-	
-	hr=D3DObjects.device->CreateBuffer( &bufferDesc,NULL, &D3DObjects.vertexBuffer );
-    if(FAILED(hr))
-	{
-		UD3D12RenderDevice::debugs("Error creating vertex buffer.");
-		return 0;
-	}
+	// Create default buffer resource
+	hr = D3DObjects.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(V_BUFFER_SIZE*sizeof(Vertex)), // may be incorrect
+		D3D12_RESOURCE_STATE_COMMON,
+		nullptr,
+		IID_PPV_ARGS(D3DObjects.vertexBuf.GetAddressOf())
+	);
 
+	// Create intermediate upload heap
+	hr = D3DObjects.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(V_BUFFER_SIZE*sizeof(Vertex)), // may be incorrect
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(D3DObjects.vertexBufUploader.GetAddressOf())
+	);
+
+	// Describe the data we want to copy into the default buffer
+	D3D12_SUBRESOURCE_DATA subResourceData = {};
+	subResourceData.pData = initData;
+	subResourceData.RowPitch = sizeof(Vertex);
+	subResourceData.SlicePitch = subResourceData.RowPitch;
+	
 	//Create index buffer
-	bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
-	bufferDesc.ByteWidth = sizeof(int)*I_BUFFER_SIZE;
-	bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-	bufferDesc.CPUAccessFlags   = D3D11_CPU_ACCESS_WRITE;
-    bufferDesc.MiscFlags        = 0;
-	hr = D3DObjects.device->CreateBuffer( &bufferDesc,NULL, &D3DObjects.indexBuffer);
-	if(FAILED(hr))
+	D3D12_RESOURCE_DESC ibDesc;
+	ibDesc.Usage = D3D11_USAGE_DYNAMIC;
+	ibDesc.ByteWidth = sizeof(int)*I_BUFFER_SIZE;
+	ibDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	ibDesc.CPUAccessFlags   = D3D11_CPU_ACCESS_WRITE;
+    ibDesc.MiscFlags        = 0;
+	hr = D3DObjects.device->CreateCommittedResource( &ibDesc,NULL, &D3DObjects.indexBuf);
+    if(FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Error creating index buffer.");
 		return 0;
 	}
 
+	// Root signature descriptor
+	// Create a root parameter that expects a descriptor table of 1 constant vie buffer, that
+	// gets bound to constant buffer register 0 in the HLSL code.
+	CD3DX12_ROOT_PARAMETER slotRootParameter[1];
+	CD3DX12_DESCRIPTOR_RANGE cbvTable;
+	cbvTable.Init(
+		D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+		1,	// number of desriptors in table
+		0); // base shader register arguments are bound to for this root parmeter
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(1, slotRootParameter, 0, nullptr);
+
+	// Serialise root signature
+	ComPtr<ID3DBlob> sRootSig = nullptr;
+	ComPtr<ID3DBlob> errBlob = nullptr;
+	hr = D3D12SerializeRootSignature(
+		&rootSigDesc,
+		D3D_ROOT_SIGNATURE_VERSION_1,
+		sRootSig.GetAddressOf(),
+		errBlob.GetAddressOf());
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error serializing root signature.");
+		return 0;
+	}
+
+	// Create root signature
+	hr = D3DObjects.device->CreateRootSignature(
+		0,
+		sRootSig->GetBufferPointer(),
+		sRootSig->GetBufferSize(),
+		IID_PPV_ARGS(&D3DObjects.rootSig));
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error crearing root signature.");
+		return 0;
+	}
+
+	// Pipeline state object descriptor
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc;
+	ZeroMemory(&psoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
+	psoDesc.InputLayout = ilDesc;
+	psoDesc.pRootSignature = D3DObjects.rootSig.Get();
+	psoDesc.VS = { reinterpret_cast<BYTE*>(shadBlob->GetBufferPointer()), shadBlob->GetBufferSize() };
+	psoDesc.PS = { reinterpret_cast<BYTE*>(shadBlob->GetBufferPointer()), shadBlob->GetBufferSize() };
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	psoDesc.SampleMask = UINT_MAX;
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	psoDesc.NumRenderTargets = 1;
+	psoDesc.RTVFormats[0] = BACKBUFFER_FORMAT;
+	psoDesc.SampleDesc.Count = options.samples;
+	psoDesc.SampleDesc.Quality = 0; // fix?
+	psoDesc.DSVFormat = DEPTH_STENCIL_FORMAT;
+
+	// Create the pipeline state
+	hr = D3DObjects.device->CreateGraphicsPipelineState(
+		&psoDesc,
+		IID_PPV_ARGS(&D3DObjects.pipelineState)
+	);
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Error creating pipeline state object.");
+		return 0;
+	}
+
 #ifdef _DEBUGDX
 	//Disable certain debug output
-	ID3D11InfoQueue * pInfoQueue;
-	D3DObjects.device->QueryInterface( __uuidof(ID3D11InfoQueue),  (void **)&pInfoQueue );
+	ID3D12InfoQueue * pInfoQueue;
+	D3DObjects.device->QueryInterface( __uuidof(ID3D12InfoQueue),  (void **)&pInfoQueue );
 
-	//set up the list of messages to filter
-	D3D11_MESSAGE_ID messageIDs [] = { D3D11_MESSAGE_ID_DEVICE_DRAW_SHADERRESOURCEVIEW_NOT_SET,
+	// Set up the list of messages to filter
+	// msuz: find correct messages that we want here
+	D3D12_MESSAGE_ID messageIDs [] = {
+		/* D3D11_MESSAGE_ID_DEVICE_DRAW_SHADERRESOURCEVIEW_NOT_SET,
 		D3D11_MESSAGE_ID_PSSETSHADERRESOURCES_UNBINDDELETINGOBJECT,
 		D3D11_MESSAGE_ID_OMSETRENDERTARGETS_UNBINDDELETINGOBJECT,
-		D3D11_MESSAGE_ID_CHECKFORMATSUPPORT_FORMAT_DEPRECATED};
+		D3D11_MESSAGE_ID_CHECKFORMATSUPPORT_FORMAT_DEPRECATED */
+		D3D12_MESSAGE_ID_CREATEGRAPHICSPIPELINESTATE_VERTEX_SHADER_NOT_SET
+	};
+
 
 	//set the DenyList to use the list of messages
-	D3D11_INFO_QUEUE_FILTER filter = { 0 };
+	D3D12_INFO_QUEUE_FILTER filter = { 0 };
 	filter.DenyList.NumIDs = sizeof(messageIDs);
 	filter.DenyList.pIDList = messageIDs;
 
@@ -376,7 +603,7 @@ int D3D::createRenderTargetViews()
 
 	//Backbuffer
 	ID3D11Texture2D* pBuffer;
-	hr = D3DObjects.swapChain->GetBuffer( 0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBuffer );
+	hr = D3DObjects.swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBuffer);
 	if(FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Error getting swap chain buffer.");
@@ -385,20 +612,60 @@ int D3D::createRenderTargetViews()
 	
 	hr = D3DObjects.device->CreateRenderTargetView(pBuffer,NULL,&D3DObjects.renderTargetView );
 	SAFE_RELEASE(pBuffer);
+	hr = D3DObjects.device->CreateRenderTargetView(pBuffer, NULL, &D3DObjects.renderTargetView);
 	if(FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Error creating render target view (back).");
 		return 0;
 	}
 
-	DXGI_SWAP_CHAIN_DESC scd;
-	D3DObjects.swapChain->GetDesc(&scd);
+	DXGI_SWAP_CHAIN_DESC swapChainDesc;
+	D3DObjects.swapChain->GetDesc(&swapChainDesc);
 	
 
-	//Depth stencil
-	D3D11_TEXTURE2D_DESC descDepth;
+	//Descriptor for depth stencil view
+	D3D12_RESOURCE_DESC dsvDesc;
+	dsvDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	dsvDesc.Width = swapChainDesc.BufferDesc.Width;
+	dsvDesc.Height = swapChainDesc.BufferDesc.Height;
+	dsvDesc.MipLevels = 1;
+	//descDepth.ArraySize = 1;
+	dsvDesc.Format =  DEPTH_STENCIL_FORMAT;
+	dsvDesc.SampleDesc.Count = options.samples;
+	dsvDesc.SampleDesc.Quality = 0;
+	//descDepth.Usage = D3D11_USAGE_DEFAULT;
+	//descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	dsvDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+	//descDepth.CPUAccessFlags = 0;
+	//descDepth.MiscFlags = 0;
+
+	D3D12_CLEAR_VALUE optClear;
+	optClear.Format = DEPTH_STENCIL_FORMAT;
+	optClear.DepthStencil.Depth = 1.0f;
+	optClear.DepthStencil.Stencil = 0;
 	
-	//Internal texture
+	// Create resource for depth stencil view
+	hr = D3DObjects.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&dsvDesc,
+		D3D12_RESOURCE_STATE_COMMON,
+		&optClear,
+		IID_PPV_ARGS(D3DObjects.depthStencilView.GetAddressOf()));
+	if (FAILED(hr))
+	{
+		UD3D12RenderDevice::debugs("Depth texture resource creation failed.");
+		return 0;
+	}
+
+	// Create the actual depth stencil view
+	// D3D12 CreateDepthStencilView has no return (rather than HRESULT for d3d11)
+	D3DObjects.device->CreateDepthStencilView(
+		D3DObjects.depthStencilView.Get(),
+		nullptr,
+		D3DObjects.dsvHeap->GetCPUDescriptorHandleForHeapStart());
+	
+	/*
 	ID3D11Texture2D *depthTexInternal;
 	descDepth.Width = scd.BufferDesc.Width;
 	descDepth.Height = scd.BufferDesc.Height;
@@ -416,7 +683,9 @@ int D3D::createRenderTargetViews()
 		UD3D12RenderDevice::debugs("Depth texture creation failed.");
 		return 0;
 	}
+	*/
 
+	/*
 	//Depth Stencil view
 	D3D11_DEPTH_STENCIL_VIEW_DESC descDSV;
 	descDSV.Format = descDepth.Format;
@@ -428,6 +697,7 @@ int D3D::createRenderTargetViews()
 		return 0;
 	}
 	SAFE_RELEASE(depthTexInternal);
+	*/
 	
 	return 1;
 }
