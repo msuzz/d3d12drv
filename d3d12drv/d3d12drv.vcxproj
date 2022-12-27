@@ -345,6 +345,7 @@
     <ClCompile Include="d3d.cpp" />
     <ClCompile Include="d3d12drv.cpp" />
     <ClCompile Include="misc.cpp" />
+    <ClCompile Include="src\dxguids.cpp" />
     <ClCompile Include="texconversion.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -923,6 +924,39 @@
     <ClInclude Include="d3d.h" />
     <ClInclude Include="d3d12drv.h" />
     <ClInclude Include="doxymain.h" />
+    <ClInclude Include="include\directx\d3d12.h" />
+    <ClInclude Include="include\directx\d3d12compatibility.h" />
+    <ClInclude Include="include\directx\d3d12sdklayers.h" />
+    <ClInclude Include="include\directx\d3d12shader.h" />
+    <ClInclude Include="include\directx\d3d12video.h" />
+    <ClInclude Include="include\directx\d3dcommon.h" />
+    <ClInclude Include="include\directx\d3dx12.h" />
+    <ClInclude Include="include\directx\d3dx12_barriers.h" />
+    <ClInclude Include="include\directx\d3dx12_check_feature_support.h" />
+    <ClInclude Include="include\directx\d3dx12_core.h" />
+    <ClInclude Include="include\directx\d3dx12_default.h" />
+    <ClInclude Include="include\directx\d3dx12_pipeline_state_stream.h" />
+    <ClInclude Include="include\directx\d3dx12_render_pass.h" />
+    <ClInclude Include="include\directx\d3dx12_resource_helpers.h" />
+    <ClInclude Include="include\directx\d3dx12_root_signature.h" />
+    <ClInclude Include="include\directx\d3dx12_state_object.h" />
+    <ClInclude Include="include\directx\dxcore.h" />
+    <ClInclude Include="include\directx\dxcore_interface.h" />
+    <ClInclude Include="include\directx\dxgicommon.h" />
+    <ClInclude Include="include\directx\dxgiformat.h" />
+    <ClInclude Include="include\dxguids\dxguids.h" />
+    <ClInclude Include="include\wsl\stubs\basetsd.h" />
+    <ClInclude Include="include\wsl\stubs\oaidl.h" />
+    <ClInclude Include="include\wsl\stubs\ocidl.h" />
+    <ClInclude Include="include\wsl\stubs\rpc.h" />
+    <ClInclude Include="include\wsl\stubs\rpcndr.h" />
+    <ClInclude Include="include\wsl\stubs\unknwn.h" />
+    <ClInclude Include="include\wsl\stubs\unknwnbase.h" />
+    <ClInclude Include="include\wsl\stubs\winapifamily.h" />
+    <ClInclude Include="include\wsl\stubs\wrl\client.h" />
+    <ClInclude Include="include\wsl\stubs\wrl\implements.h" />
+    <ClInclude Include="include\wsl\winadapter.h" />
+    <ClInclude Include="include\wsl\wrladapter.h" />
     <ClInclude Include="misc.h" />
     <ClInclude Include="polyflags.h" />
     <ClInclude Include="resource.h" />
@@ -938,6 +972,15 @@
   <ItemGroup>
     <None Include="d3d12Drv.int" />
     <None Include="unreal.fxh" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="include\directx\d3d12.idl" />
+    <Midl Include="include\directx\d3d12compatibility.idl" />
+    <Midl Include="include\directx\d3d12sdklayers.idl" />
+    <Midl Include="include\directx\d3d12video.idl" />
+    <Midl Include="include\directx\d3dcommon.idl" />
+    <Midl Include="include\directx\dxgicommon.idl" />
+    <Midl Include="include\directx\dxgiformat.idl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

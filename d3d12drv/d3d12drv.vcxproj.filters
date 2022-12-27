@@ -54,6 +54,9 @@
     <ClCompile Include="texconversion.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\dxguids.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="customflags.h">
@@ -1793,6 +1796,105 @@
     <ClInclude Include="..\Games\Rune_100\Core\Inc\UnVcWn32SSE.h">
       <Filter>Game Headers\Rune_100</Filter>
     </ClInclude>
+    <ClInclude Include="include\directx\d3d12.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3d12compatibility.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3d12sdklayers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3d12shader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3d12video.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dcommon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_barriers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_check_feature_support.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_core.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_default.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_pipeline_state_stream.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_render_pass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_resource_helpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_root_signature.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\d3dx12_state_object.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\dxcore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\dxcore_interface.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\dxgicommon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\directx\dxgiformat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\dxguids\dxguids.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\basetsd.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\oaidl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\ocidl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\rpc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\rpcndr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\unknwn.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\unknwnbase.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\winapifamily.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\wrl\client.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\stubs\wrl\implements.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\winadapter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\wsl\wrladapter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res.rc">
@@ -1812,5 +1914,28 @@
       <Filter>FX</Filter>
     </None>
     <None Include="d3d12Drv.int" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="include\directx\d3d12.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
+    <Midl Include="include\directx\d3d12compatibility.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
+    <Midl Include="include\directx\d3d12sdklayers.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
+    <Midl Include="include\directx\d3d12video.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
+    <Midl Include="include\directx\d3dcommon.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
+    <Midl Include="include\directx\dxgicommon.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
+    <Midl Include="include\directx\dxgiformat.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
   </ItemGroup>
 </Project>
