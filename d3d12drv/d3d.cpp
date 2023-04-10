@@ -234,9 +234,8 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	// Check MSAA support and clamp to max level.
 	if(!D3D::findAALevel()) 
 		return 0;
-	SAFE_RELEASE(pDXGIDevice);
-	SAFE_RELEASE(pDXGIAdapter);
-	SAFE_RELEASE(pIDXGIFactory);
+
+	// Original code called SAFE_RELEASE() on DXGI device, factory and adapter here
 
 	// Create command queue
 	D3D12_COMMAND_QUEUE_DESC cqd;
