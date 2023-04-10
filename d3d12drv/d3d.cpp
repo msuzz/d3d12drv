@@ -1223,6 +1223,26 @@ void D3D::setFlags(int flags, int D3DFlags)
 }
 
 /**
+Return D3D12_CPU_DESCRIPTOR_HANDLE with RTV of the current back buffer.
+*/
+D3D12_CPU_DESCRIPTOR_HANDLE D3D::currentRenderTargetView()
+{
+	return CD3DX12_CPU_DESCRIPTOR_HANDLE(
+		D3DObjects.rtvHeap->GetCPUDescriptorHandleForHeapStart(), // handle start
+		currBackBuf,	  // index to offset
+		rtvDescriptorSize // byte size of descriptor
+	);
+}
+
+/**
+Return D3D12_CPU_DESCRIPTOR_HANDLE with DSV of the current back buffer.
+*/
+D3D12_CPU_DESCRIPTOR_HANDLE D3D::currentDepthStencilView()
+{
+	return D3DObjects.dsvHeap->GetCPUDescriptorHandleForHeapStart();
+}
+
+/**
 Create a texture from a descriptor and data to fill it with.
 \param desc Direct3D texture description.
 \param data Data to fill the texture with.

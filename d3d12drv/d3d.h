@@ -16,6 +16,8 @@ private:
 	static int findAALevel();
 	static void commit();
 	static ID3DX11EffectPass* switchToPass(int index); // TODO: Find D3D12 replacement
+	static D3D12_CPU_DESCRIPTOR_HANDLE currentRenderTargetView();
+	static D3D12_CPU_DESCRIPTOR_HANDLE currentDepthStencilView();
 	
 public:
 	/**
