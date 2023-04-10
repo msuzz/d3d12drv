@@ -102,6 +102,7 @@ public:
 	{
 		int samples; /**< Number of MSAA samples */
 		int VSync; /**< VSync on/off */
+		int refresh; /**< Refresh rate **/
 		int aniso; /**< Anisotropic filtering levels */
 		int LODBias; /**< Mipmap LOD bias */
 		float brightness; /**< Game brightness */

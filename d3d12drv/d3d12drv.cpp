@@ -93,6 +93,7 @@ void UD3D12RenderDevice::StaticConstructor()
 	new(GetClass(), L"Antialiasing", RF_Public) UIntProperty(CPP_PROPERTY(D3DOptions.samples), TEXT("Options"), CPF_Config);
 	new(GetClass(), L"Anisotropy", RF_Public) UIntProperty(CPP_PROPERTY(D3DOptions.aniso), TEXT("Options"), CPF_Config);
 	new(GetClass(), L"VSync", RF_Public) UBoolProperty(CPP_PROPERTY(D3DOptions.VSync), TEXT("Options"), CPF_Config);
+	new(GetClass(), L"RefreshRate", RF_Public) UIntProperty(CPP_PROPERTY(D3DOptions.refresh), TEXT("Options"), CPF_Config);
 	new(GetClass(), L"ParallaxOcclusionMapping", RF_Public) UBoolProperty(CPP_PROPERTY(D3DOptions.POM), TEXT("Options"), CPF_Config);
 	new(GetClass(), L"LODBias", RF_Public) UIntProperty(CPP_PROPERTY(D3DOptions.LODBias), TEXT("Options"), CPF_Config);
 	new(GetClass(), L"AlphaToCoverage", RF_Public) UBoolProperty(CPP_PROPERTY(D3DOptions.alphaToCoverage), TEXT("Options"), CPF_Config);
@@ -164,7 +165,7 @@ UBOOL UD3D12RenderDevice::Init(UViewport *InViewport,INT NewX, INT NewY, INT New
 	D3DOptions.samples = getOption(L"Antialiasing",4,false);
 	D3DOptions.aniso = getOption(L"Anisotropy",8,false);
 	D3DOptions.VSync = getOption(L"VSync",1,true);	
-	D3DOptions.POM = getOption(L"ParallaxOcclusionMapping",0,true);	
+	D3DOptions.refresh = getOption(L"RefreshRate", 1, true);
 	D3DOptions.LODBias = getOption(L"LODBias",0,false);
 	int atocDefault=0;
 	#if(DEUSEX) //Enable alpha to coverage for deus ex as it doens't have obvious glitching skyboxes
