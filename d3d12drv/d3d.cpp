@@ -174,7 +174,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	}
 	#endif
 
-	// Create the factory
+	// Create the factory - needed for software (WARP) adapter and swapchain
 	hr = CreateDXGIFactory1(IID_PPV_ARGS(&D3DObjects.factory));
 	if (FAILED(hr))
 	{
@@ -185,13 +185,32 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	// Create the Direct3D 12 device
 	hr = D3D12CreateDevice(
 		NULL,
-		D3D_FEATURE_LEVEL_12_0,
+		minFeatureLevel,
 		IID_PPV_ARGS(&D3DObjects.device)
 	);
 	if (FAILED(hr))
 	{
-		UD3D12RenderDevice::debugs("Error creating device.");
+		// Fall back to WARP if hardware device creation fails
+		UD3D12RenderDevice::debugs("Error creating hardware device. Falling back to WARP (software) adapter.");
+
+		ComPtr<IDXGIAdapter> pWarpAdapter;
+		hr = D3DObjects.factory->EnumWarpAdapter(IID_PPV_ARGS(&pWarpAdapter));
+		if (FAILED(hr))
+		{
+			UD3D12RenderDevice::debugs("Failed to enumerate WARP adapter.");
 		return 0;
+	}
+
+		hr = D3D12CreateDevice(
+			pWarpAdapter.Get(),
+			minFeatureLevel,
+			IID_PPV_ARGS(&D3DObjects.device)
+		);
+		if (FAILED(hr))
+		{
+			UD3D12RenderDevice::debugs("Failed to create WARP device.");
+			return 0;
+		}
 	}
 
 	// Create fence for GPU/CPU synchronisation
