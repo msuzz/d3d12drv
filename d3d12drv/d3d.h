@@ -12,6 +12,7 @@
 class D3D
 {
 private:
+	static HWND mainWnd;
 	static int createRenderTargetViews();
 	static int findAALevel();
 	static void commit();

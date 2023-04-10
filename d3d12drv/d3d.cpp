@@ -151,6 +151,7 @@ Initialisation order is based on the book "Introduction to 3D Game Programming w
 int D3D::init(HWND hWnd,D3D::Options &createOptions)
 {
 	HRESULT hr;
+	mainWnd = hWnd;
 
 	options = createOptions; // Set config options
 	CLAMP(options.samples,1,D3D12_MAX_MULTISAMPLE_SAMPLE_COUNT);
@@ -278,37 +279,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 
 	D3DObjects.cmdList->Close(); // Command list must be closed before resetting
 
-	// Describe and create swap chain
-	DXGI_SWAP_CHAIN_DESC scd;
-	ZeroMemory(&scd, sizeof(scd));
-	scd.BufferCount = scdBufCount;
-	scd.BufferDesc.Width = Window::getWidth();
-	scd.BufferDesc.Height = Window::getHeight();
-	scd.BufferDesc.Format = BACKBUFFER_FORMAT;
-	scd.BufferDesc.RefreshRate.Numerator = 60;
-	scd.BufferDesc.RefreshRate.Denominator = 1;
-	scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	scd.OutputWindow = hWnd;
-	scd.SampleDesc.Count = options.samples;
-	scd.SampleDesc.Quality = 0;
-	scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH; // If unspecified, will use desktop display mode in fullscreen
-	scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	scd.Windowed = TRUE;
-
-	hr = D3DObjects.factory->CreateSwapChain(
-		D3DObjects.cmdQueue.Get(),
-		&scd,
-		&D3DObjects.swapChain
-	);
-	if(FAILED(hr))
-	{
-		UD3D12RenderDevice::debugs("Error creating swap chain.");
-		return 0;
-	}
-	D3DObjects.factory->MakeWindowAssociation(hWnd,DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_PRINT_SCREEN |DXGI_MWA_NO_ALT_ENTER); //Stop DXGI from interfering with the game
-	D3DObjects.swapChain->GetContainingOutput(&D3DObjects.output);
-		
-	// Describe and create the RTV/DSV descriptor heaps
+	// Describe the RTV descriptor heap
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
 	rtvHeapDesc.NumDescriptors = scdBufCount;
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -344,7 +315,15 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 		return 0;
 	}
 		
-	//Create the effect we'll be using
+	// Create swap chain, RTV and DSV
+	if (!D3D::createRenderTargetViews())
+		return 0;
+
+	// TODO: Are these two commands needed?
+	D3DObjects.factory->MakeWindowAssociation(mainWnd, DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_PRINT_SCREEN | DXGI_MWA_NO_ALT_ENTER); // Stop DXGI from interfering with the game
+	D3DObjects.swapChain->GetContainingOutput(&D3DObjects.output);
+		
+	// Create the effect we'll be using
 	ComPtr<ID3DBlob> shadBlob = nullptr;
 	ComPtr<ID3DBlob> shadErrBlob;
 	DWORD dwShaderFlags = D3DCOMPILE_ENABLE_STRICTNESS;
@@ -622,49 +601,60 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 }
 
 /**
-Create a render target view from the backbuffer and depth stencil buffer.
+Create swapchain, render target view, and depth stencil view
 */
 int D3D::createRenderTargetViews()
 {
 	HRESULT hr;
 
-	//Backbuffer
-	ID3D11Texture2D* pBuffer;
-	hr = D3DObjects.swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBuffer);
-	if(FAILED(hr))
-	{
-		UD3D12RenderDevice::debugs("Error getting swap chain buffer.");
-		return 0;
-	}
+	D3DObjects.swapChain.Reset(); // Release previous swapchain
 	
-	hr = D3DObjects.device->CreateRenderTargetView(pBuffer,NULL,&D3DObjects.renderTargetView );
-	SAFE_RELEASE(pBuffer);
-	hr = D3DObjects.device->CreateRenderTargetView(pBuffer, NULL, &D3DObjects.renderTargetView);
-	if(FAILED(hr))
+	// Describe swap chain
+	DXGI_SWAP_CHAIN_DESC scDesc;
+	scDesc.BufferCount = scdBufCount;
+	// Temporarily use 1080p until I can find where the Window class is
+	scDesc.BufferDesc.Width = 1920;
+	scDesc.BufferDesc.Height = 1080;
+	//scd.BufferDesc.Width = Window::getWidth();
+	//scd.BufferDesc.Height = Window::getHeight();
+	scDesc.BufferDesc.Format = BACKBUFFER_FORMAT;
+	scDesc.BufferDesc.RefreshRate.Numerator = options.refresh;
+	scDesc.BufferDesc.RefreshRate.Denominator = 1;
+	scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	scDesc.OutputWindow = mainWnd;
+	scDesc.SampleDesc.Count = options.samples;
+	scDesc.SampleDesc.Quality = 0;
+	scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH; // If unspecified, will use desktop display mode in fullscreen
+	scDesc.Windowed = TRUE;
+
+	// Create swap chain
+	hr = D3DObjects.factory->CreateSwapChain(
+		D3DObjects.cmdQueue.Get(),
+		&scDesc,
+		&D3DObjects.swapChain
+	);
+	if (FAILED(hr))
 	{
-		UD3D12RenderDevice::debugs("Error creating render target view (back).");
+		UD3D12RenderDevice::debugs("Error creating swap chain.");
 		return 0;
 	}
 
-	DXGI_SWAP_CHAIN_DESC swapChainDesc;
-	D3DObjects.swapChain->GetDesc(&swapChainDesc);
+	// TODO: RTV here
 	
-
 	//Descriptor for depth stencil view
 	D3D12_RESOURCE_DESC dsvDesc;
 	dsvDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-	dsvDesc.Width = swapChainDesc.BufferDesc.Width;
-	dsvDesc.Height = swapChainDesc.BufferDesc.Height;
+	dsvDesc.Alignment = 0;
+	dsvDesc.Width = scDesc.BufferDesc.Width;
+	dsvDesc.Height = scDesc.BufferDesc.Height;
+	dsvDesc.DepthOrArraySize = 1;
 	dsvDesc.MipLevels = 1;
-	//descDepth.ArraySize = 1;
-	dsvDesc.Format =  DEPTH_STENCIL_FORMAT;
+	dsvDesc.Format = DEPTH_STENCIL_FORMAT;
 	dsvDesc.SampleDesc.Count = options.samples;
 	dsvDesc.SampleDesc.Quality = 0;
-	//descDepth.Usage = D3D11_USAGE_DEFAULT;
-	//descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	dsvDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 	dsvDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-	//descDepth.CPUAccessFlags = 0;
-	//descDepth.MiscFlags = 0;
 
 	D3D12_CLEAR_VALUE optClear;
 	optClear.Format = DEPTH_STENCIL_FORMAT;
@@ -678,7 +668,8 @@ int D3D::createRenderTargetViews()
 		&dsvDesc,
 		D3D12_RESOURCE_STATE_COMMON,
 		&optClear,
-		IID_PPV_ARGS(D3DObjects.depthStencilView.GetAddressOf()));
+		IID_PPV_ARGS(D3DObjects.depthStencilView.GetAddressOf())
+	);
 	if (FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Depth texture resource creation failed.");
@@ -692,39 +683,15 @@ int D3D::createRenderTargetViews()
 		nullptr,
 		D3DObjects.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 	
-	/*
-	ID3D11Texture2D *depthTexInternal;
-	descDepth.Width = scd.BufferDesc.Width;
-	descDepth.Height = scd.BufferDesc.Height;
-	descDepth.MipLevels = 1;
-	descDepth.ArraySize = 1;
-	descDepth.Format =  DXGI_FORMAT_D32_FLOAT;
-	descDepth.SampleDesc.Count = options.samples;
-	descDepth.SampleDesc.Quality = 0;
-	descDepth.Usage = D3D11_USAGE_DEFAULT;
-	descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-	descDepth.CPUAccessFlags = 0;
-	descDepth.MiscFlags = 0;
-	if(FAILED(D3DObjects.device->CreateTexture2D( &descDepth, NULL,&depthTexInternal )))
-	{
-		UD3D12RenderDevice::debugs("Depth texture creation failed.");
-		return 0;
-	}
-	*/
-
-	/*
-	//Depth Stencil view
-	D3D11_DEPTH_STENCIL_VIEW_DESC descDSV;
-	descDSV.Format = descDepth.Format;
-	descDSV.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
-	descDSV.Flags = 0;
-	if(FAILED(D3DObjects.device->CreateDepthStencilView(depthTexInternal,&descDSV,&D3DObjects.depthStencilView )))
-	{
-		UD3D12RenderDevice::debugs("Error creating render target view (depth).");
-		return 0;
-	}
-	SAFE_RELEASE(depthTexInternal);
-	*/
+	// Transition the resource from its initial state to be used as a depth buffer
+	D3DObjects.cmdList->ResourceBarrier(
+		1,
+		&CD3DX12_RESOURCE_BARRIER::Transition(
+			D3DObjects.depthStencilView.Get(),
+			D3D12_RESOURCE_STATE_COMMON,
+			D3D12_RESOURCE_STATE_DEPTH_WRITE
+		)
+	);
 	
 	return 1;
 }
