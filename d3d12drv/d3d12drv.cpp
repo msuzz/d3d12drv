@@ -18,7 +18,7 @@ Called UD3D11RenderDevice as Unreal leaves out first letter when accessing the c
 #include <io.h>
 #include <FCNTL.H>
 #include "resource.h"
-#include "D3D12Drv.h"
+#include "d3d12drv.h"
 #include "texconversion.h"
 #include "customflags.h"
 #include "misc.h"

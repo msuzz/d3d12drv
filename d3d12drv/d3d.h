@@ -6,8 +6,8 @@
 #define SAFE_RELEASE(p)      { if(p) { (p)->Release(); (p)=NULL; } }
 #define CLAMP(p,min,max)	{ if(p < min) p = min; else if (p>max) p = max; }
 
-#include <D3D12.h>
-#include <D3DX11Effect.h> // TODO: Find D3D12 replacement
+#include <d3d12.h>
+#include "include/directx/d3dx12.h"
 
 class D3D
 {
