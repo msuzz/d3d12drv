@@ -42,6 +42,7 @@ D3D Objects
 */
 static struct
 {
+	// TODO: Which of these can be local instead?
 	ComPtr<IDXGIFactory4> factory;
 	ComPtr<IDXGIOutput> output;
 	ComPtr<ID3D12Device3> device;
@@ -52,15 +53,15 @@ static struct
 	ComPtr<ID3D12GraphicsCommandList> cmdList;
 	ComPtr<ID3D12RootSignature> rootSig;
 	ComPtr<ID3D12PipelineState> pipelineState;
-	ID3D12Resource* renderTargetView; //ID3D11RenderTargetView -> ID3D12Resource (needs flag D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET)
+	ComPtr<ID3D12Resource> renderTargetView;
+	ComPtr<ID3D12Resource> depthStencilView;
 	ID3D11InputLayout* vertexLayout;
 	ComPtr<ID3D12Resource> vertexBuf = nullptr;
 	ComPtr<ID3D12Resource> vertexBufUploader = nullptr;
 	ComPtr<ID3D12Resource> indexBuf;
 	ID3DX11Effect* effect;
-	ComPtr<ID3D12Resource> depthStencilView; // Depth stencil view
-	ComPtr<ID3D12DescriptorHeap> rtvHeap;   // Render target view heap
-	ComPtr<ID3D12DescriptorHeap> dsvHeap;   // Depth stencil view heap
+	ComPtr<ID3D12DescriptorHeap> rtvHeap;
+	ComPtr<ID3D12DescriptorHeap> dsvHeap;
 } D3DObjects;
 
 /**
@@ -87,15 +88,15 @@ States (defined in fx file)
 */
 static struct
 {
+	// TODO: Deal with these
 	ID3D11DepthStencilState* dstate_Enable;
 	ID3D11DepthStencilState* dstate_Disable;
-	// msuzz: Deal with these
-	/*ID3D11BlendState* bstate_Alpha;
+	ID3D11BlendState* bstate_Alpha;
 	ID3D11BlendState* bstate_Translucent;
 	ID3D11BlendState* bstate_Modulate;
 	ID3D11BlendState* bstate_NoBlend;
 	ID3D11BlendState* bstate_Masked;
-	ID3D11BlendState* bstate_Invis;	*/
+	ID3D11BlendState* bstate_Invis;
 } states;
 
 /**
@@ -129,7 +130,7 @@ Misc
 */
 static const DXGI_FORMAT BACKBUFFER_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 static const DXGI_FORMAT DEPTH_STENCIL_FORMAT = DXGI_FORMAT_D24_UNORM_S8_UINT;
-static const D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_12_0; // Direct3D 12 uses a single min feature level
+static const D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_12_0;
 static const float TIME_STEP = (1/60.0f); //Shader time variable increase speed
 static D3D::Options options;
 int scdBufCount = 1;
@@ -141,6 +142,7 @@ UINT64 currentFence = 0;
 
 /**
 Create Direct3D device, swapchain, etc. Purely boilerplate stuff.
+Initialisation order is based on the book "Introduction to 3D Game Programming with DirectX 12" by Frank D. Luna.
 
 \param hWnd Window to use as a surface.
 \param createOptions the D3D::Options which to use.
@@ -150,14 +152,14 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 {
 	HRESULT hr;
 
-	options = createOptions; //Set config options
+	options = createOptions; // Set config options
 	CLAMP(options.samples,1,D3D12_MAX_MULTISAMPLE_SAMPLE_COUNT);
 	CLAMP(options.aniso,0,16);
 	CLAMP(options.VSync,0,1);
 	CLAMP(options.LODBias,-10,10);
 	UD3D12RenderDevice::debugs("Initializing Direct3D 12.");
 
-	//Enable the debug layer for debug builds
+	// Enable the debug layer for debug builds
 	#ifdef _DEBUGDX
 	{
 		//flags = D3D11_CREATE_DEVICE_DEBUG; //debug runtime (prints debug messages)
@@ -230,6 +232,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 		return 0;
 	}
 
+	// Create command allocator
 	hr = D3DObjects.device->CreateCommandAllocator(
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
 		IID_PPV_ARGS(D3DObjects.cmdAlloc.GetAddressOf())
@@ -240,6 +243,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 		return 0;
 	}
 
+	// Create command list
 	hr = D3DObjects.device->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -253,7 +257,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 		return 0;
 	}
 
-	D3DObjects.cmdList->Close();
+	D3DObjects.cmdList->Close(); // Command list must be closed before resetting
 
 	// Describe and create swap chain
 	DXGI_SWAP_CHAIN_DESC scd;
@@ -292,6 +296,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	rtvHeapDesc.NodeMask = 0;
 
+	// Create the RTV descriptor heap
 	hr = D3DObjects.device->CreateDescriptorHeap(
 		&rtvHeapDesc,
 		IID_PPV_ARGS(D3DObjects.rtvHeap.GetAddressOf())
@@ -302,12 +307,14 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 		return 0;
 	}
 
+	// Describe the DSV descriptor heap
 	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
 	dsvHeapDesc.NumDescriptors = 1;
 	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
 	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	dsvHeapDesc.NodeMask = 0;
 
+	// Create the DSV descriptor heap
 	hr = D3DObjects.device->CreateDescriptorHeap(
 		&dsvHeapDesc,
 		IID_PPV_ARGS(D3DObjects.dsvHeap.GetAddressOf())
@@ -492,14 +499,14 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 	ibDesc.CPUAccessFlags   = D3D11_CPU_ACCESS_WRITE;
     ibDesc.MiscFlags        = 0;
 	hr = D3DObjects.device->CreateCommittedResource( &ibDesc,NULL, &D3DObjects.indexBuf);
-    if(FAILED(hr))
+	if (FAILED(hr))
 	{
 		UD3D12RenderDevice::debugs("Error creating index buffer.");
 		return 0;
 	}
 
 	// Root signature descriptor
-	// Create a root parameter that expects a descriptor table of 1 constant vie buffer, that
+	// Create a root parameter that expects a descriptor table of 1 constant view buffer, that
 	// gets bound to constant buffer register 0 in the HLSL code.
 	CD3DX12_ROOT_PARAMETER slotRootParameter[1];
 	CD3DX12_DESCRIPTOR_RANGE cbvTable;
@@ -591,6 +598,7 @@ int D3D::init(HWND hWnd,D3D::Options &createOptions)
 
 #endif
 
+	// D3D12 initialisation complete
 	return 1;
 }
 
@@ -716,6 +724,7 @@ void D3D::uninit()
 		D3DObjects.deviceContext->ClearState();
 	D3DObjects.deviceContext->Flush();
 
+	// TODO: Ensure all new D3DObjects are here
 	SAFE_RELEASE(D3DObjects.vertexLayout);
 	SAFE_RELEASE(D3DObjects.vertexBuffer);
 	SAFE_RELEASE(D3DObjects.indexBuffer);
@@ -1544,43 +1553,36 @@ Find the maximum level of MSAA supported by the device and clamp the options.MSA
 */
 int D3D::findAALevel()
 {
-/*
-msuzz Notes: To check if an AA setting is supported in Direct3D 11, we call ID3D11Device::CheckMultisampleQualityLevels
-with a sample count (count), and the output pointer (&levels) receives a positive value if it is supported. This method
-no longer exists in Direct3D 12. Instead, we create a D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS enum and send it to
-ID3D12Device::CheckFeatureSupport. This method will modify the enum with the result.
-*/
-
-{
-	//Create device to check MSAA support with
 	HRESULT hr;
 	D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS ms;
-
-	//Check MSAA support by going down the counts until a suitable one is found	
 	ms.Format = BACKBUFFER_FORMAT;
 	ms.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
 	ms.NumQualityLevels = 0;
-	
-	for(ms.SampleCount=options.samples; ms.NumQualityLevels==0 && ms.SampleCount>0; ms.SampleCount--)
+	// Descend through and check each sample count of the ms struct
+	for (ms.SampleCount = options.samples; ms.NumQualityLevels == 0 && ms.SampleCount > 0; ms.SampleCount--)
 	{
 		hr = D3DObjects.device->CheckFeatureSupport(
 			D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
-			&ms,sizeof(ms)
+			&ms,
+			sizeof(ms)
 		);
-		if(FAILED(hr))
+		if (FAILED(hr))
 		{
 			UD3D12RenderDevice::debugs("Error getting MSAA support level.");
 			return 0;
 		}
 
-		if(ms.NumQualityLevels!=0) //sample amount is supported
+		if (ms.NumQualityLevels != 0) // A quality level of 0 means sample count not supported by hardware
 			break;
 	}
+
+	// Lower the user-specified MSAA setting if higher than the max supported by hardware
 	if(ms.SampleCount != options.samples)
 	{
 		UD3D12RenderDevice::debugs("Anti aliasing setting decreased; requested setting unsupported.");
 		options.samples = ms.SampleCount;
 	}
+
 	return 1;
 }
 
